@@ -1,17 +1,33 @@
-#include <cstring>
+#include <cstdint>
 #include <svdpi.h>
 
-// This function forces C++ to use native 32-bit float math
-extern "C" int c_fp32_multiply(int a, int b) {
-  float fa, fb;
+extern "C" {
+#include "softfloat.h"
+}
 
-  // Copy bits safely (avoids strict aliasing violations)
-  std::memcpy(&fa, &a, sizeof(float));
-  std::memcpy(&fb, &b, sizeof(float));
+extern "C" {
 
-  float result = fa * fb;
+void dpi_init_softfloat() {
+  softfloat_roundingMode = softfloat_round_near_even;
+  softfloat_detectTininess = softfloat_tininess_beforeRounding;
+}
 
-  int res_bits;
-  std::memcpy(&res_bits, &result, sizeof(float));
-  return res_bits;
+int c_fp32_multiply(int a, int b, int *flags) {
+  float32_t fa, fb, fres;
+
+  // Bit-cast SV int to SoftFloat struct
+  fa.v = (uint32_t)a;
+  fb.v = (uint32_t)b;
+
+  // Reset flags
+  softfloat_exceptionFlags = 0;
+
+  // Multiply
+  fres = f32_mul(fa, fb);
+
+  // Capture flags (Overflow, Underflow, etc.)
+  *flags = (int)softfloat_exceptionFlags;
+
+  return (int)fres.v;
+}
 }

@@ -4,17 +4,23 @@ PRJ_DIR = $(shell pwd)
 SRC_DIR = $(PRJ_DIR)/src
 TB_DIR  = $(PRJ_DIR)/testbenches
 
+# --- SoftFloat Configuration ---
+SOFTFLOAT_BASE = $(TB_DIR)/berkeley-softfloat-3
+SOFTFLOAT_INC  = $(SOFTFLOAT_BASE)/source/include
+# Note: This path matches the one you provided
+SOFTFLOAT_LIB  = $(SOFTFLOAT_BASE)/build/Linux-x86_64-GCC/softfloat.a
+
 VERILATOR = verilator
 VCS       = vcs
 WAVE      = surfer
 
-KARATSUBA_FILES = \
+FP32MULTIPLIER_FILES = \
     R4Booth.sv \
     karatsubaUnsigned.sv \
     fp32Multiplier.sv
 
 DESIGN_FILES = \
-    $(addprefix $(SRC_DIR)/,$(KARATSUBA_FILES))
+    $(addprefix $(SRC_DIR)/,$(FP32MULTIPLIER_FILES))
 
 TESTBENCH  = TB_fp32Multiplier.sv
 CPP_FILES  = $(TB_DIR)/fp32_ref.cpp
@@ -30,13 +36,16 @@ VERILATOR_FLAGS = \
     --top-module $(TOP_MODULE) \
     --threads $(shell nproc) \
     --sv \
+    --autoflush \
     -I$(SRC_DIR) \
     -I$(TB_DIR) \
     --Mdir $(VERILATOR_DIR) \
     --Wno-WIDTHTRUNC \
     --Wno-WIDTHEXPAND \
     --Wno-WIDTHCONCAT \
-    --Wno-INITIALDLY
+    --Wno-INITIALDLY \
+    -CFLAGS "-I$(SOFTFLOAT_INC)" \
+    -LDFLAGS "$(SOFTFLOAT_LIB)"
 
 
 VCS_FLAGS = \
@@ -48,7 +57,8 @@ VCS_FLAGS = \
     +v2k \
     +incdir+$(SRC_DIR) \
     +incdir+$(TB_DIR) \
-    +define+VCS
+    +define+VCS \
+    -CFLAGS "-I$(SOFTFLOAT_INC)"
 
 default: help
 
@@ -73,76 +83,77 @@ help:
 
 
 verilator: check-files
-			@echo "=== Verilator simulation for $(TOP_MODULE) ==="
-			@mkdir -p $(VERILATOR_DIR)
-			@echo "-- Compiling RTL..."
-			$(VERILATOR) --binary \
-					$(VERILATOR_FLAGS) \
-					$(DESIGN_FILES) \
-					$(TB_DIR)/$(TESTBENCH) \
-					$(CPP_FILES) \
-					-o $(TOP_MODULE)_sim
-			@echo "-- Building Executable..."
-			make -C $(VERILATOR_DIR) -f V$(TOP_MODULE).mk
-			@echo "-- Running Simulation..."
-			cd $(VERILATOR_DIR) && ./$(TOP_MODULE)_sim
-			@echo "=== Simulation Complete ==="
-			@echo "-- Trace file: $(VERILATOR_DIR)/dump.vcd"
+	@echo "=== Verilator simulation for $(TOP_MODULE) ==="
+	@mkdir -p $(VERILATOR_DIR)
+	@echo "-- Compiling RTL..."
+	$(VERILATOR) --binary \
+		$(VERILATOR_FLAGS) \
+		$(DESIGN_FILES) \
+		$(TB_DIR)/$(TESTBENCH) \
+		$(CPP_FILES) \
+		-o $(TOP_MODULE)_sim
+	@echo "-- Building Executable..."
+	make -C $(VERILATOR_DIR) -f V$(TOP_MODULE).mk
+	@echo "-- Running Simulation..."
+	cd $(VERILATOR_DIR) && ./$(TOP_MODULE)_sim
+	@echo "=== Simulation Complete ==="
+	@echo "-- Trace file: $(VERILATOR_DIR)/dump.vcd"
 
 
 vcs: check-files
-			@echo "=== VCS simulation for $(TOP_MODULE) ==="
-			@mkdir -p $(VCS_DIR)
-			$(VCS) $(VCS_FLAGS) \
-					-o $(VCS_DIR)/$(TOP_MODULE)_sim \
-					$(DESIGN_FILES) \
-					$(TB_DIR)/$(TESTBENCH) \
-					$(CPP_FILES)
-			@echo "-- Running VCS simulation"
-			cd $(VCS_DIR) && ./$(TOP_MODULE)_sim
-			@echo "=== VCS simulation complete ==="
+	@echo "=== VCS simulation for $(TOP_MODULE) ==="
+	@mkdir -p $(VCS_DIR)
+	$(VCS) $(VCS_FLAGS) \
+		-o $(VCS_DIR)/$(TOP_MODULE)_sim \
+		$(DESIGN_FILES) \
+		$(TB_DIR)/$(TESTBENCH) \
+		$(CPP_FILES) \
+		$(SOFTFLOAT_LIB)
+	@echo "-- Running VCS simulation"
+	cd $(VCS_DIR) && ./$(TOP_MODULE)_sim
+	@echo "=== VCS simulation complete ==="
 
 wave:
-			@if [ -f $(VERILATOR_DIR)/dump.vcd ]; then \
-					echo "-- Opening Verilator waveform"; \
-					$(WAVE) $(VERILATOR_DIR)/dump.vcd; \
-			elif [ -f $(VCS_DIR)/dump.vcd ]; then \
-					echo "-- Opening VCS waveform"; \
-					$(WAVE) $(VCS_DIR)/dump.vcd; \
-			else \
-					echo "-- No waveform dumps found. Run 'make verilator' first."; \
-			fi
+	@if [ -f $(VERILATOR_DIR)/dump.vcd ]; then \
+		echo "-- Opening Verilator waveform"; \
+		$(WAVE) $(VERILATOR_DIR)/dump.vcd; \
+	elif [ -f $(VCS_DIR)/dump.vcd ]; then \
+		echo "-- Opening VCS waveform"; \
+		$(WAVE) $(VCS_DIR)/dump.vcd; \
+	else \
+		echo "-- No waveform dumps found. Run 'make verilator' first."; \
+	fi
 
 lint:
-			@echo "=== Linting $(TOP_MODULE) ==="
-			@mkdir -p $(VERILATOR_DIR)
-			$(VERILATOR) --lint-only \
-					$(VERILATOR_FLAGS) \
-					$(DESIGN_FILES) \
-					$(TB_DIR)/$(TESTBENCH)
-			@echo "-- Lint check complete"
+	@echo "=== Linting $(TOP_MODULE) ==="
+	@mkdir -p $(VERILATOR_DIR)
+	$(VERILATOR) --lint-only \
+		$(VERILATOR_FLAGS) \
+		$(DESIGN_FILES) \
+		$(TB_DIR)/$(TESTBENCH)
+	@echo "-- Lint check complete"
 
 check-files:
-			@echo "=== Checking source files ==="
-			@missing=0; \
-			for file in $(DESIGN_FILES) $(TB_DIR)/$(TESTBENCH) $(CPP_FILES); do \
-					if [ ! -f "$$file" ]; then \
-					echo "  MISSING: $$file"; \
-					missing=$$((missing + 1)); \
-					fi; \
-			done; \
-			if [ $$missing -eq 0 ]; then \
-					echo "  OK: All files found."; \
-			else \
-					echo "  ERROR: $$missing file(s) missing!"; \
-					exit 1; \
-			fi
+	@echo "=== Checking source files ==="
+	@missing=0; \
+	for file in $(DESIGN_FILES) $(TB_DIR)/$(TESTBENCH) $(CPP_FILES) $(SOFTFLOAT_LIB); do \
+		if [ ! -f "$$file" ]; then \
+		echo "  MISSING: $$file"; \
+		missing=$$((missing + 1)); \
+		fi; \
+	done; \
+	if [ $$missing -eq 0 ]; then \
+		echo "  OK: All files found."; \
+	else \
+		echo "  ERROR: $$missing file(s) missing!"; \
+		exit 1; \
+	fi
 
 clean:
-			@echo "-- Cleaning simulation artifacts"
-			-rm -rf $(VERILATOR_DIR) $(VCS_DIR)
-			-rm -f *.vpd *.vcd *.wlf *.log *.key
-			-rm -f csrc simv simv.daidir
-			@echo "-- Clean complete"
+	@echo "-- Cleaning simulation artifacts"
+	-rm -rf $(VERILATOR_DIR) $(VCS_DIR)
+	-rm -f *.vpd *.vcd *.wlf *.log *.key
+	-rm -f csrc simv simv.daidir
+	@echo "-- Clean complete"
 
 .PHONY: default help verilator vcs wave lint check-files clean

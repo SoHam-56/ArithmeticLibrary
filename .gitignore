@@ -1,3 +1,6 @@
 VIVADO/
 Verilator/
 VCS/
+gen_vectors
+*.o
+*.a

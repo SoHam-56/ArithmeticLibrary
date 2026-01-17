@@ -15,9 +15,6 @@ module R4Booth #(
 
   localparam NUM_PP = (N / 2) + 1;
 
-  // ---------------------------------------------------------
-  // Pipeline Stage 1: Partial Product Generation
-  // ---------------------------------------------------------
   logic [2*N-1:0] pp_reg[0:NUM_PP-1];
   logic valid_s1;
 
@@ -45,10 +42,8 @@ module R4Booth #(
       for (int k = 0; k < NUM_PP; k++) pp_reg[k] <= '0;
     end else begin
       valid_s1 <= valid_i;
-
       for (int i = 0; i < NUM_PP; i++) begin
         triplet = multiplier_padded[(2*i)+:3];
-
         case (triplet)
           3'b000:  pp_comb = '0;
           3'b001:  pp_comb = s_multiplicand;
@@ -60,35 +55,10 @@ module R4Booth #(
           3'b111:  pp_comb = '0;
           default: pp_comb = '0;
         endcase
-
-        // Register the shifted Partial Product
         pp_reg[i] <= pp_comb << (2 * i);
       end
     end
   end
-
-  // ---------------------------------------------------------
-  // Pipeline Stage 2: Summation (Adder Tree)
-  // ---------------------------------------------------------
-  logic [(2*N)-1:0] sum_final;
-  logic valid_s2;
-
-  always_ff @(posedge clk_i or negedge rstn_i) begin
-    if (!rstn_i) begin
-      sum_final <= '0;
-      valid_s2  <= 0;
-    end else begin
-      valid_s2  <= valid_s1;
-
-      // Sum all partial products
-      sum_final <= '0;
-      for (int k = 0; k < NUM_PP; k++) begin
-        if (k == 0) sum_final <= pp_reg[k];
-        else sum_final <= sum_final + pp_reg[k];
-      end
-    end
-  end
-
 
   logic [(2*N)-1:0] adder_tree_comb;
   always_comb begin
