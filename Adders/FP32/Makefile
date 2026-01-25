@@ -4,16 +4,28 @@ PRJ_DIR = $(shell pwd)
 SRC_DIR = $(PRJ_DIR)/src
 TB_DIR  = $(PRJ_DIR)/testbenches
 
+# --- SoftFloat Configuration ---
+SOFTFLOAT_BASE = $(TB_DIR)/berkeley-softfloat-3
+SOFTFLOAT_INC  = $(SOFTFLOAT_BASE)/source/include
+# Note: This path matches the one you provided
+SOFTFLOAT_LIB  = $(SOFTFLOAT_BASE)/build/Linux-x86_64-GCC/softfloat.a
+
 VERILATOR = verilator
 VCS       = vcs
 WAVE      = surfer
 
-KARATSUBA_FILES = \
-    fp32Adder.sv \
-    LZC.sv
+# ADDER_FILES = \
+#     fp32Adder.sv \
+#     LZC.sv
 
-DESIGN_FILES = \
-    $(addprefix $(SRC_DIR)/,$(KARATSUBA_FILES))
+# DESIGN_FILES = \
+#     $(addprefix $(SRC_DIR)/,$(ADDER_FILES))
+
+ADDER_FILES = \
+    /home/admin/Desktop/SystolicArray/src/MAC/Adder_FP32.sv \
+    /home/admin/Desktop/SystolicArray/src/MAC/LZC.sv
+
+DESIGN_FILES = $(ADDER_FILES)
 
 TESTBENCH  = TB_fp32Adder.sv
 CPP_FILES  = $(TB_DIR)/fp32_ref.cpp
@@ -36,7 +48,9 @@ VERILATOR_FLAGS = \
     --Wno-WIDTHEXPAND \
     --Wno-WIDTHCONCAT \
     --Wno-INITIALDLY \
-		--Wno-SHORTREAL
+		--Wno-SHORTREAL \
+		-CFLAGS "-I$(SOFTFLOAT_INC)" \
+    -LDFLAGS "$(SOFTFLOAT_LIB)"
 
 
 VCS_FLAGS = \

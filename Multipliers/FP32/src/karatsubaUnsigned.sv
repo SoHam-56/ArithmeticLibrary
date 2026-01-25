@@ -66,7 +66,7 @@ module karatsubaUnsigned #(
   logic unused_valid_1, unused_valid_2;
 
   // Low Part
-  R4Booth #(HALF_WIDTH) booth_low (
+  u_R4Booth #(HALF_WIDTH) booth_low (
       .clk_i(clk_i),
       .rstn_i(rstn_i),
       .valid_i(s1_valid),
@@ -77,7 +77,7 @@ module karatsubaUnsigned #(
   );
 
   // High Part
-  R4Booth #(HALF_WIDTH) booth_high (
+  u_R4Booth #(HALF_WIDTH) booth_high (
       .clk_i(clk_i),
       .rstn_i(rstn_i),
       .valid_i(s1_valid),
@@ -88,7 +88,7 @@ module karatsubaUnsigned #(
   );
 
   // Middle Part
-  R4Booth #(MID_WIDTH) booth_mid (
+  u_R4Booth #(MID_WIDTH) booth_mid (
       .clk_i(clk_i),
       .rstn_i(rstn_i),
       .valid_i(s1_valid),

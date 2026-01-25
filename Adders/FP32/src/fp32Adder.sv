@@ -15,27 +15,31 @@ module fp32Adder (
 );
 
   typedef struct packed {
-    logic is_nan;
-    logic is_inf;
-    logic is_zero;
-    logic pure_bypass;
-    logic sign;
+    logic       is_invalid_op;  // Set for (Inf - Inf) OR Signaling NaN inputs
+    logic       is_nan;         // Result is NaN
+    logic       is_inf;         // Result is Inf
+    logic       is_zero;
+    logic       pure_bypass;
+    logic       sign;
     logic [7:0] exp;
-    logic op_sub;
+    logic       op_sub;
   } meta_t;
 
+  // =========================================================================
+  // STAGE 1: Unpack, Detect Specials, Align
+  // =========================================================================
   logic       s1_valid;
   logic [7:0] s1_diff;
   logic [23:0] s1_man_big, s1_man_small;
   meta_t s1_meta;
 
-
   logic sa, sb;
   logic [7:0] ea, eb;
-  logic [22:0] ma_raw, mb_raw;  // Original Mantissas
-  logic [22:0] ma, mb;          // Flushed Mantissas
+  logic [22:0] ma_raw, mb_raw;
+  logic [22:0] ma, mb;
   logic hidden_a, hidden_b;
   logic a_nan, b_nan, a_inf, b_inf, a_zero, b_zero;
+  logic a_snan, b_snan;  // New signals for SNaN detection
   logic op_sub_wire;
   logic comp_a_ge_b;
 
@@ -44,28 +48,33 @@ module fp32Adder (
     {sa, ea, ma_raw} = A;
     {sb, eb, mb_raw} = B;
 
-    // FORCE FLUSH TO ZERO
-    // If exponent is 0, we kill the mantissa. This forces subnormals to 0.
+    // FORCE FLUSH TO ZERO (FTZ)
     if (ea == 0) ma = 23'd0;
     else ma = ma_raw;
     if (eb == 0) mb = 23'd0;
     else mb = mb_raw;
 
     // Hidden Bits
-    // Since subnormals are flushed, ea!=0 guarantees a normal number (hidden=1)
     hidden_a = (ea != 0);
     hidden_b = (eb != 0);
 
     // Classification (Using Flushed Values)
-    a_zero = (ea == 0);                   // Mantissa is already forced to 0 above
+    a_zero = (ea == 0);
     b_zero = (eb == 0);
 
-    a_nan = (ea == 255) && (ma_raw != 0);  // NaNs preserve payload
+    // NaN Detection
+    a_nan = (ea == 255) && (ma_raw != 0);
     b_nan = (eb == 255) && (mb_raw != 0);
+
+    // SNaN Detection (Signaling NaN)
+    // In IEEE 754-2008, MSB of Mantissa (bit 22) is 0 for SNaN, 1 for QNaN.
+    a_snan = a_nan && (ma_raw[22] == 0);
+    b_snan = b_nan && (mb_raw[22] == 0);
+
+    // Inf Detection
     a_inf = (ea == 255) && (ma_raw == 0);
     b_inf = (eb == 255) && (mb_raw == 0);
 
-  
     op_sub_wire = sa ^ sb;
 
     // Compare Magnitude
@@ -83,11 +92,20 @@ module fp32Adder (
     end else begin
       s1_valid <= valid_i;
       if (valid_i) begin
-        s1_meta.is_nan      <= (a_nan || b_nan) || ((a_inf && b_inf) && (sa != sb));
-        s1_meta.is_inf      <= (a_inf || b_inf);
-        s1_meta.is_zero     <= (a_zero && b_zero);
-        s1_meta.pure_bypass <= (a_zero ^ b_zero);
-        s1_meta.op_sub      <= op_sub_wire;
+        // 1. Invalid Operation: 
+        //    Case A: Inf - Inf
+        //    Case B: Any Signaling NaN Input
+        s1_meta.is_invalid_op <= ((a_inf && b_inf) && (sa != sb)) || (a_snan || b_snan);
+
+        // 2. Result NaN: Any Input NaN OR Invalid Op
+        s1_meta.is_nan        <= (a_nan || b_nan) || ((a_inf && b_inf) && (sa != sb));
+
+        // 3. Result Inf: Any Input Inf (Unless it's the invalid case)
+        s1_meta.is_inf        <= (a_inf || b_inf);
+
+        s1_meta.is_zero       <= (a_zero && b_zero);
+        s1_meta.pure_bypass   <= (a_zero ^ b_zero);
+        s1_meta.op_sub        <= op_sub_wire;
 
         if (comp_a_ge_b) begin
           s1_man_big   <= {hidden_a, ma};
@@ -106,6 +124,9 @@ module fp32Adder (
     end
   end
 
+  // =========================================================================
+  // STAGE 2: Align Shift
+  // =========================================================================
   logic         s2_valid;
   logic  [26:0] s2_man_big;
   logic  [26:0] s2_man_small;
@@ -118,7 +139,7 @@ module fp32Adder (
       s2_man_big <= {s1_man_big, 3'b0};
 
       if (s1_meta.pure_bypass) begin
-        s2_man_small <= 0;                      // Optimization: Force 0 for quiet adder
+        s2_man_small <= 0;
       end else begin
         if (s1_diff >= 26) s2_man_small <= 27'b1;
         else s2_man_small <= {s1_man_small, 3'b0} >> s1_diff;
@@ -126,6 +147,9 @@ module fp32Adder (
     end
   end
 
+  // =========================================================================
+  // STAGE 3: Add/Sub
+  // =========================================================================
   logic         s3_valid;
   logic  [27:0] s3_sum;
   meta_t        s3_meta;
@@ -139,6 +163,9 @@ module fp32Adder (
     end
   end
 
+  // =========================================================================
+  // STAGE 4: Normalize & Output
+  // =========================================================================
   logic         s4_valid;
   logic  [27:0] s4_sum;
   logic  [ 4:0] s4_lzc;
@@ -166,7 +193,6 @@ module fp32Adder (
   logic [ 4:0] shift_amt;
 
   always_comb begin
-
     norm_man  = s4_sum;
     norm_exp  = {1'b0, s4_meta.exp};
     shift_amt = 0;
@@ -176,18 +202,15 @@ module fp32Adder (
       norm_exp = s4_meta.exp;
     end else begin
       if (s4_sum[27]) begin
-        // Carry: Shift Right 1
         norm_man = s4_sum >> 1;
         norm_exp = s4_meta.exp + 1;
       end else if (s4_lzc == 1) begin
-        // Normal: No shift
         norm_man = s4_sum;
         norm_exp = s4_meta.exp;
       end else if (s4_meta.is_zero) begin
         norm_man = 0;
         norm_exp = 0;
       end else if (s4_lzc > 1) begin
-        // Cancellation: Shift Left
         shift_amt = s4_lzc - 1;
         norm_man  = s4_sum << shift_amt;
         norm_exp  = s4_meta.exp - shift_amt;
@@ -206,24 +229,29 @@ module fp32Adder (
       done_o <= s4_valid;
 
       if (s4_valid) begin
-        overflow_o  <= 0;
-        underflow_o <= 0;
-        invalid_o   <= s4_meta.is_nan;
+        // --- Flag Logic ---
+        invalid_o <= s4_meta.is_invalid_op;
 
-        if (s4_meta.is_nan) begin
-          result_o <= 32'h7FC00000;
-        end else if (s4_meta.is_inf) begin
-          result_o   <= {s4_meta.sign, 8'hFF, 23'h0};
+        if ((norm_exp >= 255) && !s4_meta.is_inf && !s4_meta.is_nan) begin
           overflow_o <= 1'b1;
+        end else begin
+          overflow_o <= 0;
+        end
+
+        underflow_o <= 0;
+
+        // --- Result Mux ---
+        if (s4_meta.is_nan) begin
+          result_o <= 32'h7FC00000;  // Force Quiet NaN
+        end else if (s4_meta.is_inf) begin
+          result_o <= {s4_meta.sign, 8'hFF, 23'h0};
         end else if (s4_meta.is_zero) begin
           result_o <= {s4_meta.sign, 31'h0};
         end else if ($signed(norm_exp) <= 0 && !s4_meta.pure_bypass) begin
-          // Flush Result Underflow to Zero
           result_o    <= {s4_meta.sign, 31'h0};
           underflow_o <= 1'b1;
         end else if (norm_exp >= 255) begin
-          result_o   <= {s4_meta.sign, 8'hFF, 23'h0};
-          overflow_o <= 1'b1;
+          result_o <= {s4_meta.sign, 8'hFF, 23'h0};
         end else begin
           result_o <= {s4_meta.sign, norm_exp[7:0], norm_man[25:3]};
         end

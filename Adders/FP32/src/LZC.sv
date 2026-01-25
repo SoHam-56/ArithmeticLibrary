@@ -6,22 +6,18 @@ module cntlz28 (
 );
   logic [3:0] c_hi, c_mid, c_lo, c_bot;
 
-  // Top 8 bits [27:20]
   cntlz8 u1 (
       i[27:20],
       c_hi
   );
-  // Next 8 bits [19:12]
   cntlz8 u2 (
       i[19:12],
       c_mid
   );
-  // Next 8 bits [11:4]
   cntlz8 u3 (
       i[11:4],
       c_lo
   );
-  // Bottom 4 bits [3:0] (padded with 0s for the 8-bit module)
   cntlz8 u4 (
       {i[3:0], 4'b0},
       c_bot

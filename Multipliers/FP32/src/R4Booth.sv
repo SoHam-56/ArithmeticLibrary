@@ -1,6 +1,6 @@
 `timescale 1ns / 100ps
 
-module R4Booth #(
+module u_R4Booth #(
     parameter N = 12
 ) (
     input logic clk_i,

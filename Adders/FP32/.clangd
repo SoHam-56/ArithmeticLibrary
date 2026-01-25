@@ -1,4 +1,0 @@
-CompileFlags:
-  Add:
-    - "-I/usr/share/verilator/include/vltstd"
-    - "-I/usr/share/verilator/include"

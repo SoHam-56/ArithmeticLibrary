@@ -2,25 +2,19 @@
 
 module TB_fp32MultiplierVIVADO;
 
-  // -------------------------------------------------------------------------
-  // 1. Setup (No DPI Imports!)
-  // -------------------------------------------------------------------------
   localparam WIDTH = 32;
   localparam NUM_VECTORS = 10000;
 
-  // Clock and Reset
   logic clk = 0;
   logic rstn = 0;
   always #5 clk = ~clk;
 
-  // DUT Signals
   logic valid_i;
   logic [WIDTH-1:0] A_i, B_i;
   logic [WIDTH-1:0] result_dut;
   logic done_o;
   logic overflow_dut, underflow_dut, invalid_dut;
 
-  // Statistics
   int err_count = 0;
   int tx_count = 0;
 
@@ -28,9 +22,6 @@ module TB_fp32MultiplierVIVADO;
   // Format: A(32) + B(32) + Res(32) + Flags(8) = 104 bits
   logic [103:0] test_vectors[0:NUM_VECTORS-1];
 
-  // -------------------------------------------------------------------------
-  // 2. Transaction Management (Scoreboard)
-  // -------------------------------------------------------------------------
   typedef struct {
     logic [31:0] a;
     logic [31:0] b;
@@ -45,9 +36,6 @@ module TB_fp32MultiplierVIVADO;
 
   transaction_t exp_queue[$];
 
-  // -------------------------------------------------------------------------
-  // 3. DUT Instantiation
-  // -------------------------------------------------------------------------
   fp32Multiplier dut (
       .clk_i      (clk),
       .rstn_i     (rstn),
@@ -61,9 +49,6 @@ module TB_fp32MultiplierVIVADO;
       .invalid_o  (invalid_dut)
   );
 
-  // -------------------------------------------------------------------------
-  // 4. Driver Task
-  // -------------------------------------------------------------------------
   task drive_bus(input logic [31:0] a, input logic [31:0] b, input logic [31:0] golden_res,
                  input logic [7:0] golden_flags);
     transaction_t tx;
@@ -95,9 +80,6 @@ module TB_fp32MultiplierVIVADO;
     repeat (2) @(posedge clk);
   endtask
 
-  // -------------------------------------------------------------------------
-  // 5. Monitor & Checker (Robust Logic)
-  // -------------------------------------------------------------------------
   always @(posedge clk) begin
     if (rstn && done_o) begin
       transaction_t exp;
@@ -112,10 +94,10 @@ module TB_fp32MultiplierVIVADO;
         exp = exp_queue.pop_front();
         tx_count++;
 
-        // --- CHECK 1: Result Data ---
+        // --- Check Result Data ---
         result_match = 0;
 
-        // [FIXED] Allow Flush-to-Zero vs Denormal Mismatch (Handling +/- Zero)
+        // Allow Flush-to-Zero vs Denormal Mismatch (Handling +/- Zero)
         // Check if DUT result is Zero (ignoring sign bit) AND SoftFloat expected a Denormal (Exp=0)
         if (underflow_dut && (result_dut[30:0] == 0) && (exp.expected_res[30:23] == 0)) begin
           result_match = 1;
@@ -132,11 +114,11 @@ module TB_fp32MultiplierVIVADO;
           if (diff <= 2) result_match = 1;
         end
 
-        // --- CHECK 2: Exception Flags ---
+        // --- Check Exception Flags ---
         flags_match = 1;
         if (overflow_dut != exp.exp_overflow) flags_match = 0;
 
-        // [FIXED] Ignore underflow mismatch if we flushed to zero successfully
+        // Ignore underflow mismatch if we flushed to zero successfully
         if (underflow_dut != exp.exp_underflow && !(underflow_dut && result_dut[30:0] == 0))
           flags_match = 0;
 

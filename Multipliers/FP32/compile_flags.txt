@@ -1,0 +1,6 @@
+-I
+testbenches/berkeley-softfloat-3/source/include
+-I
+/usr/share/verilator/include/vltstd
+-I
+/usr/share/verilator/include

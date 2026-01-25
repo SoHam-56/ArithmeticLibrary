@@ -1,5 +1,0 @@
-CompileFlags:
-  Add:
-    - "-I/usr/share/verilator/include/vltstd"
-    - "-I/usr/share/verilator/include"
-    - "-I./testbenches/berkeley-softfloat-3/source/include"
