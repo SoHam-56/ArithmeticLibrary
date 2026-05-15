@@ -34,7 +34,8 @@ VERILATOR_FLAGS = \
     --Wno-WIDTHTRUNC \
     --Wno-WIDTHEXPAND \
     --Wno-WIDTHCONCAT \
-    --Wno-INITIALDLY
+    --Wno-INITIALDLY \
+		--Wno-IMPLICITSTATIC
 
 
 VCS_FLAGS = \

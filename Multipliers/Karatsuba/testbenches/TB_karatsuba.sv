@@ -53,31 +53,44 @@ module TB_karatsuba;
     signed_valid_i = 0;
     signed_multiplicand = 0;
     signed_multiplier = 0;
-
     repeat (5) @(posedge clk);
     rstn = 1;
     repeat (2) @(posedge clk);
   endtask
 
-  task drive_unsigned_transaction(input logic [WIDTH-1:0] a, input logic [WIDTH-1:0] b);
-    unsigned_valid_i <= 1;
+  // FIXED: 'automatic' ensures internal logic isn't static
+  task automatic drive_unsigned_transaction(input logic [WIDTH-1:0] a, input logic [WIDTH-1:0] b);
+    logic [(2*WIDTH)-1:0] a_wide, b_wide, expected;
+    a_wide   = a;
+    b_wide   = b;
+    expected = a_wide * b_wide;
+
+    unsigned_valid_i      <= 1;
     unsigned_multiplicand <= a;
-    unsigned_multiplier <= b;
-    unsigned_queue.push_back((2 * WIDTH)'(a) * (2 * WIDTH)'(b));
+    unsigned_multiplier   <= b;
+    unsigned_queue.push_back(expected);
   endtask
 
-  task drive_signed_transaction(input logic signed [WIDTH-1:0] a, input logic signed [WIDTH-1:0] b);
-    signed_valid_i <= 1;
+  task automatic drive_signed_transaction(input logic signed [WIDTH-1:0] a,
+                                          input logic signed [WIDTH-1:0] b);
+    logic signed [(2*WIDTH)-1:0] a_wide, b_wide, expected;
+    a_wide   = a;
+    b_wide   = b;
+    expected = a_wide * b_wide;
+
+    signed_valid_i      <= 1;
     signed_multiplicand <= a;
-    signed_multiplier <= b;
-    signed_queue.push_back((2 * WIDTH)'(a) * (2 * WIDTH)'(b));
+    signed_multiplier   <= b;
+    signed_queue.push_back(expected);
   endtask
 
+  // FIXED: Declaration and pop_front are separated so it executes dynamically
   always @(posedge clk) begin
     if (rstn && unsigned_valid_o) begin
-      logic [(2*WIDTH)-1:0] expected_val = unsigned_queue.pop_front();
-      unsigned_transaction_count++;
+      logic [(2*WIDTH)-1:0] expected_val;
+      expected_val = unsigned_queue.pop_front();
 
+      unsigned_transaction_count++;
       if (unsigned_product_dut !== expected_val) begin
         $error("Unsigned Mismatch: Expected %h, Got %h", expected_val, unsigned_product_dut);
         unsigned_error_count++;
@@ -87,9 +100,10 @@ module TB_karatsuba;
 
   always @(posedge clk) begin
     if (rstn && signed_valid_o) begin
-      logic signed [(2*WIDTH)-1:0] expected_val = signed_queue.pop_front();
-      signed_transaction_count++;
+      logic signed [(2*WIDTH)-1:0] expected_val;
+      expected_val = signed_queue.pop_front();
 
+      signed_transaction_count++;
       if (signed_product_dut !== expected_val) begin
         $error("Signed Mismatch: Expected %d, Got %d", expected_val, signed_product_dut);
         signed_error_count++;
@@ -100,23 +114,24 @@ module TB_karatsuba;
   logic [WIDTH-1:0] test_patterns[] = '{16'h0000, 16'hFFFF, 16'h1234, 16'h8000, 16'h7FFF};
 
   initial begin
-
     system_reset();
 
+    // FIXED: Shift the stimulus loop to the negative edge to guarantee setup time
+    @(negedge clk);
     foreach (test_patterns[i]) begin
       drive_unsigned_transaction(test_patterns[i], test_patterns[i]);
       drive_signed_transaction(test_patterns[i], test_patterns[i]);
-      @(posedge clk);
+      @(negedge clk);
     end
 
     unsigned_valid_i <= 0;
     signed_valid_i   <= 0;
-    @(posedge clk);
+    @(negedge clk);
 
     repeat (TEST_COUNT) begin
       drive_unsigned_transaction($urandom, $urandom);
       drive_signed_transaction($urandom, $urandom);
-      @(posedge clk);
+      @(negedge clk);
     end
 
     unsigned_valid_i <= 0;
@@ -137,7 +152,6 @@ module TB_karatsuba;
           unsigned_error_count,
           signed_error_count
       );
-
     $finish;
   end
 

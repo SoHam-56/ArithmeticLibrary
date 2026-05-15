@@ -15,8 +15,8 @@ VCS       = vcs
 WAVE      = surfer
 
 FP32MULTIPLIER_FILES = \
-    R4Booth.sv \
-    karatsubaUnsigned.sv \
+    ../../Radix4Booth/src/R4Booth.sv \
+    ../../Karatsuba/src/karatsubaUnsigned.sv \
     fp32Multiplier.sv
 
 DESIGN_FILES = \
