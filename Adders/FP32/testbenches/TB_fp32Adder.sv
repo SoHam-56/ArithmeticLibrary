@@ -36,27 +36,17 @@ module TB_fp32Adder;
 
   transaction_t exp_queue[$];
 
-  // fp32Adder dut (
-  //     .clk_i      (clk),
-  //     .rstn_i     (rstn),
-  //     .valid_i    (valid_i),
-  //     .A          (A_i),
-  //     .B          (B_i),
-  //     .result_o   (result_dut),
-  //     .done_o     (done_o),
-  //     .overflow_o (overflow_dut),
-  //     .underflow_o(underflow_dut),
-  //     .invalid_o  (invalid_dut)
-  // );
-
-  Adder_32 dut (
-      .clk_i  (clk),
-      .rstn_i (rstn),
-      .valid_i(valid_i),
-      .A      (A_i),
-      .B      (B_i),
-      .Result (result_dut),
-      .done_o (done_o)
+  fp32Adder dut (
+      .clk_i      (clk),
+      .rstn_i     (rstn),
+      .valid_i    (valid_i),
+      .A          (A_i),
+      .B          (B_i),
+      .result_o   (result_dut),
+      .done_o     (done_o),
+      .overflow_o (overflow_dut),
+      .underflow_o(underflow_dut),
+      .invalid_o  (invalid_dut)
   );
 
   function automatic logic [31:0] fix_random_input(logic [31:0] val);

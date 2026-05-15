@@ -14,18 +14,12 @@ VERILATOR = verilator
 VCS       = vcs
 WAVE      = surfer
 
-# ADDER_FILES = \
-#     fp32Adder.sv \
-#     LZC.sv
-
-# DESIGN_FILES = \
-#     $(addprefix $(SRC_DIR)/,$(ADDER_FILES))
-
 ADDER_FILES = \
-    /home/admin/Desktop/SystolicArray/src/MAC/Adder_FP32.sv \
-    /home/admin/Desktop/SystolicArray/src/MAC/LZC.sv
+    fp32Adder.sv \
+    LZC.sv
 
-DESIGN_FILES = $(ADDER_FILES)
+DESIGN_FILES = \
+    $(addprefix $(SRC_DIR)/,$(ADDER_FILES))
 
 TESTBENCH  = TB_fp32Adder.sv
 CPP_FILES  = $(TB_DIR)/fp32_ref.cpp
