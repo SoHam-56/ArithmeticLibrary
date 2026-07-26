@@ -1,18 +1,18 @@
 `timescale 1ns / 100ps
 
 module fp32Multiplier (
-    input logic        clk_i,
-    input logic        rstn_i,
-    input logic        valid_i,
-    input logic [31:0] A,
-    input logic [31:0] B,
+    input wire        clk_i,
+    input wire        rstn_i,
+    input wire        valid_i,
+    input wire [31:0] A,
+    input wire [31:0] B,
 
-    output logic [31:0] result_o,
-    output logic        done_o,
+    output reg [31:0] result_o,
+    output reg        done_o,
 
-    output logic overflow_o,   // High only on Finite -> Infinite
-    output logic underflow_o,  // High on Flush-to-Zero
-    output logic invalid_o     // High on 0*Inf or sNaN input
+    output reg overflow_o,   // High only on Finite -> Infinite
+    output reg underflow_o,  // High on Flush-to-Zero
+    output reg invalid_o     // High on 0*Inf or sNaN input
 );
 
   localparam INT_SYNC_DELAY = 1;

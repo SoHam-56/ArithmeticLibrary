@@ -1,17 +1,17 @@
 `timescale 1ns / 100ps
 
 module fp32Adder (
-    input logic        clk_i,
-    input logic        rstn_i,
-    input logic        valid_i,
-    input logic [31:0] A,
-    input logic [31:0] B,
+    input wire        clk_i,
+    input wire        rstn_i,
+    input wire        valid_i,
+    input wire [31:0] A,
+    input wire [31:0] B,
 
-    output logic [31:0] result_o,
-    output logic        done_o,
-    output logic        overflow_o,
-    output logic        underflow_o,
-    output logic        invalid_o
+    output reg [31:0] result_o,
+    output reg        done_o,
+    output reg        overflow_o,
+    output reg        underflow_o,
+    output reg        invalid_o
 );
 
   typedef struct packed {
