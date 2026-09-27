@@ -27,7 +27,9 @@ module fpMulWiden #(
   localparam int BIAS = (1 << (EXP_W - 1)) - 1;
   localparam logic [EXP_W-1:0] EXP_ONES = '1;
 
+`ifndef SYNTHESIS  // parameter checks; synthesis tools ignore or reject initial blocks
   initial if (PW > 22 || EXP_W > 8) $error("fpMulWiden: EXP_W=%0d MAN_W=%0d does not fit an exact fp32 product", EXP_W, MAN_W);
+`endif
 
   // ── Stage 1: classify the inputs and add the exponents, rebased to fp32's bias ──
   logic s1_v, s1_sign, s1_nan, s1_inf, s1_zero, s1_invalid;
