@@ -34,6 +34,11 @@ module TB_fpMultiplier #(
   int fd = 0, cyc = 0, t_issue = -1, lat = -1;
   string dump;
 
+  // Distance in ulps on the ordered line of values: -0 and +0 are the same point, as sign-magnitude subtraction is not.
+  function automatic longint ord(input logic [W-1:0] x);
+    return x[W-1] ? -longint'(x[W-2:0]) : longint'(x[W-2:0]);
+  endfunction
+
   function automatic bit is_nan(input logic [W-1:0] x);
     return (x[W-2:MAN_W] == '1) && (x[MAN_W-1:0] != '0);
   endfunction
@@ -68,7 +73,7 @@ module TB_fpMultiplier #(
       end else begin
         t = q.pop_front();
         checked++;
-        diff = int'(res) - int'(t.res);
+        diff = int'(ord(res) - ord(t.res));
         if (diff < 0) diff = -diff;
         rm = (res == t.res) || (is_nan(t.res) && is_nan(res)) || (!is_nan(t.res) && diff <= TOL) ||
              (un && res[W-2:0] == '0 && t.res[W-2:MAN_W] == '0);

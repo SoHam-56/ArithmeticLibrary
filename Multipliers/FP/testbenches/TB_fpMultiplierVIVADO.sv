@@ -22,6 +22,11 @@ module TB_fpMultiplierVIVADO #(
   int errs = 0, checked = 0;
   logic [3*W+7:0] q[$];
 
+  // Distance in ulps on the ordered line of values: -0 and +0 are the same point, as sign-magnitude subtraction is not.
+  function automatic longint ord(input logic [W-1:0] x);
+    return x[W-1] ? -longint'(x[W-2:0]) : longint'(x[W-2:0]);
+  endfunction
+
   function automatic bit is_nan(input logic [W-1:0] x);
     return (x[W-2:MAN_W] == '1) && (x[MAN_W-1:0] != '0);
   endfunction
@@ -36,7 +41,7 @@ module TB_fpMultiplierVIVADO #(
       v = q.pop_front();  // a temporary: Verilator mishandles pop_front() inside a concatenation
       {ea, eb, er, fl} = v;
       checked++;
-      diff = int'(res) - int'(er);
+      diff = int'(ord(res) - ord(er));
       if (diff < 0) diff = -diff;
       rm = (res == er) || (is_nan(er) && is_nan(res)) || (!is_nan(er) && diff <= TOL) ||
            (un && res[W-2:0] == '0 && er[W-2:MAN_W] == '0);
