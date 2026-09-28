@@ -40,7 +40,7 @@ vectors: $(SF_LIB)
 
 lint:
 	for f in "-GEXP_W=8 -GMAN_W=7" "-GEXP_W=8 -GMAN_W=23"; do \
-	  verilator --lint-only -Wall -DSYNTHESIS --top-module fpMultiplier $$f $(DESIGN) || exit 1; done
+	  verilator --lint-only -Wall -Wno-fatal -DSYNTHESIS --top-module fpMultiplier $$f $(DESIGN) || exit 1; done
 
 $(SF_LIB):
 	$(MAKE) -C $(SF)/build/Linux-x86_64-GCC

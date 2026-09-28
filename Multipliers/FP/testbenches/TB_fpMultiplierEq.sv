@@ -40,7 +40,7 @@ module TB_fpMultiplierEq #(
 
   initial begin
     build_stimulus(RANDOM);
-    repeat (3) @(posedge clk);
+    repeat (8) @(posedge clk);  // the fp32 units' unreset valid stages need 4+ cycles of reset to flush
     #1 rstn = 1;
     repeat (2) @(posedge clk);
     foreach (va[i]) begin
