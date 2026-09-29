@@ -37,7 +37,7 @@ lint:
 	  verilator --lint-only -Wall -Wno-fatal -DSYNTHESIS --top-module tfliteRequant -GROUNDING="\"$$r\"" $(PKG) $(DESIGN) || exit 1; done
 
 lint_bad:
-	verilator --lint-only -Wno-fatal -Werror-USERFATAL --top-module tfliteRequant -GROUNDING='"NEAREST"' $(PKG) $(DESIGN) \
+	@verilator --lint-only -Wno-fatal -Werror-USERFATAL --top-module tfliteRequant -GROUNDING='"NEAREST"' $(PKG) $(DESIGN) \
 	  > $(PRJ_DIR)/Verilator/lint_bad.txt 2>&1; rc=$$?; cat $(PRJ_DIR)/Verilator/lint_bad.txt; \
 	  if grep -q "tfliteRequant: unsupported ROUNDING" $(PRJ_DIR)/Verilator/lint_bad.txt && [ $$rc -ne 0 ]; then echo REJECTED; \
 	  else echo NOT-REJECTED; echo "RESULT: FAILED"; exit 1; fi
