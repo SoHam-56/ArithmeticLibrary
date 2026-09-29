@@ -1,10 +1,14 @@
 """Bit-exact numpy models of AriL's integer units and TFLite's int8 requantize; int64 arrays, int32 intermediates wrap as TFLite's C does."""
 import math
+import os
 
 import numpy as np
 
 INT32_MIN, INT32_MAX = -(1 << 31), (1 << 31) - 1
 ROUNDINGS = ("SINGLE", "DOUBLE")
+
+_ROUNDING_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..", "testbenches", "tflite_int8", "rounding.txt")
+REQ_ROUNDING = open(_ROUNDING_FILE).read().strip() if os.path.exists(_ROUNDING_FILE) else None  # G0's variant, from the SIENNA tree around this checkout
 
 
 def sx(x, w):
