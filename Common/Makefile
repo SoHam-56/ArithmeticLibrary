@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-# Common AriL checks: the format package, and the fp32 units dumped for the Python model.
+# Common AriL checks: the format package, the fp32 units dumped for the Python model, and the integer model ipu.py.
 PRJ_DIR = $(shell pwd)
 ARIL    = $(PRJ_DIR)/..
 TB_DIR  = $(PRJ_DIR)/testbenches
@@ -20,4 +20,7 @@ dump32:
 	python3 $(PRJ_DIR)/models/check_fpu.py $(PRJ_DIR)/Verilator/dump32/mul32.txt --unit mul --format fp32
 	python3 $(PRJ_DIR)/models/check_fpu.py $(PRJ_DIR)/Verilator/dump32/add32.txt --unit add --format fp32 --fp32-unit
 
-.PHONY: pkg dump32
+ipu:
+	python3 $(PRJ_DIR)/models/test_ipu.py
+
+.PHONY: pkg dump32 ipu
