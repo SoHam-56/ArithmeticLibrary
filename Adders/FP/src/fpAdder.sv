@@ -29,6 +29,11 @@ module fpAdder #(
   localparam logic [EXP_W-1:0] ONES = '1;
   localparam logic [W-1:0] QNAN = {1'b0, ONES, 1'b1, {(MAN_W - 1) {1'b0}}};
 
+  // Integer formats have their own units (intMultiplier, intAdder, fxMac): an int8 build must never fall through to this one.
+  if (EXP_W < 2) begin : G_BAD_FORMAT
+    $fatal(1, "fpAdder: EXP_W=%0d is an integer format, not a float one", EXP_W);
+  end
+
   typedef struct packed {
     logic             inv;
     logic             nan;
