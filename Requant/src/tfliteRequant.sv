@@ -1,6 +1,6 @@
 `timescale 1ns / 100ps
 
-// TFLite's int8 requantize, bit-exact (DOUBLE: SRDHM then RoundingDivideByPOT; SINGLE: TFLITE_SINGLE_ROUNDING), 3 stages.
+// TFLite's int8 requantize, bit-exact (DOUBLE: SRDHM then RoundingDivideByPOT; SINGLE: TFLITE_SINGLE_ROUNDING), 4 stages.
 module tfliteRequant #(
     parameter string ROUNDING = sienna_fmt_pkg::REQ_ROUNDING  // G0's variant; the DV overrides it to run both
 ) (
@@ -24,21 +24,24 @@ module tfliteRequant #(
     $fatal(1, "tfliteRequant: unsupported ROUNDING %s, use SINGLE or DOUBLE", ROUNDING);
   end
 
-  logic s1_v, s2_v;
+  logic s1_v, s2_v, s3_v;
   logic signed [31:0] s1_x, s1_m;  // DOUBLE: acc * 2^left wrapped to 32 bits; SINGLE: acc
   logic [5:0] s1_sh, s2_sh;  // DOUBLE: right shift 0..31; SINGLE: 31 - shift, 1..62
-  logic signed [7:0] s1_zp, s1_lo, s1_hi, s2_zp, s2_lo, s2_hi;
+  logic signed [7:0] s1_zp, s1_lo, s1_hi, s2_zp, s2_lo, s2_hi, s3_zp, s3_lo, s3_hi;
   logic signed [63:0] s2_p;  // DOUBLE: SaturatingRoundingDoublingHighMul (fits 32 bits); SINGLE: acc * mult
+  logic signed [31:0] s3_q;  // the rounded right shift, before + zp
 
   always_ff @(posedge clk_i or negedge rstn_i) begin
     if (!rstn_i) begin
       s1_v   <= 1'b0;
       s2_v   <= 1'b0;
+      s3_v   <= 1'b0;
       done_o <= 1'b0;
     end else begin
       s1_v   <= valid_i;
       s2_v   <= s1_v;
-      done_o <= s2_v;
+      s3_v   <= s2_v;
+      done_o <= s3_v;
     end
   end
 
@@ -74,10 +77,10 @@ module tfliteRequant #(
       else s2_p <= (ab + 64'sd1073741824) >>> 31;
     end
 
-  // Stage 3: the rounding right shift, + zp in int32, then max with act_min and min with act_max, TFLite's order.
+  // Stage 3: the rounding right shift alone; + zp and the clamps follow a stage later, for logic depth.
   always_ff @(posedge clk_i)
     if (s2_v) begin
-      automatic logic signed [31:0] q, y;
+      automatic logic signed [31:0] q;
       if (SINGLE) begin
         automatic logic signed [63:0] r = (s2_p + (64'sd1 <<< (s2_sh - 6'd1))) >>> s2_sh;
         q = r[31:0];  // static_cast<int32_t>: the low 32 bits
@@ -87,9 +90,19 @@ module tfliteRequant #(
         automatic logic [31:0] thr = (mask >> 1) + 32'(x[31]);
         q = (x >>> s2_sh) + (((32'(x) & mask) > thr) ? 32'sd1 : 32'sd0);  // RoundingDivideByPOT: ties away from zero
       end
-      y = q + 32'(s2_zp);
-      if (y < 32'(s2_lo)) y = 32'(s2_lo);
-      if (y > 32'(s2_hi)) y = 32'(s2_hi);
+      s3_q  <= q;
+      s3_zp <= s2_zp;
+      s3_lo <= s2_lo;
+      s3_hi <= s2_hi;
+    end
+
+  // Stage 4: + zp in int32, then max with act_min and min with act_max, TFLite's order.
+  always_ff @(posedge clk_i)
+    if (s3_v) begin
+      automatic logic signed [31:0] y;
+      y = s3_q + 32'(s3_zp);
+      if (y < 32'(s3_lo)) y = 32'(s3_lo);
+      if (y > 32'(s3_hi)) y = 32'(s3_hi);
       result_o <= y[7:0];
     end
 
