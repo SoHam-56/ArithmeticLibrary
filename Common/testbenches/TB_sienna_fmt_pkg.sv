@@ -41,13 +41,13 @@ module TB_sienna_fmt_pkg;
     expect_eq("add_lat(8,7)", add_lat(8, 7), 5);
     expect_eq("add_lat(0,7)", add_lat(0, 7), 1);
     expect_eq("fx_lat()", fx_lat(), 2);
-    expect_eq("req_lat()", req_lat(), 3);
+    expect_eq("req_lat()", req_lat(), 4);
     expect_eq("REQ_ROUNDING is SINGLE or DOUBLE", (REQ_ROUNDING == "SINGLE") || (REQ_ROUNDING == "DOUBLE"), 1);
     expect_eq("ACC8 localparam", ACC8, 32);
     expect_eq("MUL8 localparam", MUL8, 1);
     expect_eq("INT8 localparam", INT8, 1);
     expect_eq("FX8 localparam", FX8, 2);
-    expect_eq("RQ8 localparam", RQ8, 3);
+    expect_eq("RQ8 localparam", RQ8, 4);
     expect_eq("1.0", from_fp32(32'h3F800000, 7), 32'h3F80);
     expect_eq("lambda", from_fp32(32'h3F867D5F, 7), 32'h3F86);  // low half 7D5F rounds down
     expect_eq("1/2!", from_fp32(32'h3E2AAAAB, 7), 32'h3E2B);  // low half AAAB rounds up

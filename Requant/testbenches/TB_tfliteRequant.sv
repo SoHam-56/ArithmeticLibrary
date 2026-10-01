@@ -1,6 +1,6 @@
 `timescale 1ns / 100ps
 
-// tfliteRequant against ipu.requant's vectors, bit for bit, latency 3, a bubble every 64 vectors; no DPI, so Vivado runs it too.
+// tfliteRequant against ipu.requant's vectors, bit for bit, latency req_lat(), a bubble every 64 vectors; no DPI, so Vivado runs it too.
 module TB_tfliteRequant #(
     parameter string ROUNDING = "DOUBLE"
 );
