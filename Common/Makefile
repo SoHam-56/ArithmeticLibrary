@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-# Common AriL checks: the format package, the fp32 units dumped for the Python model, and the integer model ipu.py.
+# Common AriL checks: the format package, the fp32 units dumped for the Python model, the integer model ipu.py, and the credit link modules.
 PRJ_DIR = $(shell pwd)
 ARIL    = $(PRJ_DIR)/..
 TB_DIR  = $(PRJ_DIR)/testbenches
@@ -23,4 +23,44 @@ dump32:
 ipu:
 	python3 $(PRJ_DIR)/models/test_ipu.py
 
-.PHONY: pkg dump32 ipu
+# Credit link: lint, then TB_credit_link built per (STAGES, MODE): mode 0 at STAGES 0, 1, 3 fires no assertion, modes 1-4 at STAGES 0 fire the named ones.
+CREDIT_SRC  = $(PRJ_DIR)/src/credit_link_if.sv $(PRJ_DIR)/src/credit_counter.sv $(PRJ_DIR)/src/credit_reg.sv $(PRJ_DIR)/src/credit_link_checker.sv
+CREDIT_CFGS = 0_0 1_0 3_0 0_1 0_2 0_3 0_4
+CREDIT_RUNS = $(addprefix credit_run_,$(CREDIT_CFGS))
+# expected assertions per mode; mode 4 must not trip the counter's own a_no_underflow
+CREDIT_WANT_1 = a_no_underflow
+CREDIT_WANT_2 = a_within_slots a_no_overflow
+CREDIT_WANT_3 = a_all_back
+CREDIT_WANT_4 = a_put_has_credit
+
+credit: credit_lint $(CREDIT_RUNS)
+
+credit_lint:
+	@w=0; e=0; for top in credit_counter credit_reg credit_link_checker; do \
+	  verilator --lint-only -Wall -DSYNTHESIS --top-module $$top $(CREDIT_SRC) > $(PRJ_DIR)/Verilator/credit_lint_$$top.log 2>&1; \
+	  w=$$((w + $$(command grep -c '^%Warning' $(PRJ_DIR)/Verilator/credit_lint_$$top.log))); \
+	  e=$$((e + $$(command grep -c '^%Error' $(PRJ_DIR)/Verilator/credit_lint_$$top.log))); \
+	done; \
+	echo "credit lint: $$w warnings, $$e errors"; \
+	[ $$w -eq 0 ] && [ $$e -eq 0 ] || { cat $(PRJ_DIR)/Verilator/credit_lint_*.log; exit 1; }
+
+$(CREDIT_RUNS): credit_run_%:
+	@s=$(word 1,$(subst _, ,$*)); m=$(word 2,$(subst _, ,$*)); d=$(PRJ_DIR)/Verilator/credit_s$${s}_m$${m}; rm -rf $$d; \
+	verilator $(FLAGS) --top-module TB_credit_link -GSTAGES=$$s -GMODE=$$m --Mdir $$d $(CREDIT_SRC) $(TB_DIR)/TB_credit_link.sv -o sim > $$d.build.log 2>&1 \
+	  || { echo "credit STAGES=$$s MODE=$$m: BUILD FAILED"; tail -20 $$d.build.log; exit 1; }; \
+	$$d/sim +verilator+error+limit+100 > $$d.run.log 2>&1; \
+	line=$$(command grep -m1 "^CREDIT_LINK STAGES=$$s MODE=$$m:" $$d.run.log); \
+	res=$$(command grep -c "^RESULT: PASSED" $$d.run.log); \
+	fails=$$(command grep -c "Assertion failed" $$d.run.log); \
+	if [ $$m -eq 0 ]; then \
+	  [ $$res -eq 1 ] && [ $$fails -eq 0 ] && echo "credit OK: $$line, 0 assertions fired" \
+	    || { echo "credit FAIL: STAGES=$$s MODE=0: $$res PASSED lines, $$fails assertions fired"; tail -20 $$d.run.log; exit 1; }; \
+	else \
+	  want="$(CREDIT_WANT_$(word 2,$(subst _, ,$*)))"; ok=1; msg=""; \
+	  for a in $$want; do n=$$(command grep -c "Assertion failed.*\.$$a:" $$d.run.log); msg="$$msg $$a x$$n"; [ $$n -ge 1 ] || ok=0; done; \
+	  if [ $$m -eq 4 ]; then n=$$(command grep -c "Assertion failed.*\.a_no_underflow:" $$d.run.log); msg="$$msg a_no_underflow x$$n"; [ $$n -eq 0 ] || ok=0; fi; \
+	  [ $$res -eq 1 ] && [ $$ok -eq 1 ] && echo "credit OK: $$line, fired:$$msg" \
+	    || { echo "credit FAIL: STAGES=$$s MODE=$$m: $$res PASSED lines, fired:$$msg"; tail -20 $$d.run.log; exit 1; }; \
+	fi
+
+.PHONY: pkg dump32 ipu credit credit_lint $(CREDIT_RUNS)
