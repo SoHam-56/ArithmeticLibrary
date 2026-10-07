@@ -23,17 +23,18 @@ dump32:
 ipu:
 	python3 $(PRJ_DIR)/models/test_ipu.py
 
-# Credit link: lint, then TB_credit_link built per (STAGES, MODE): mode 0 at STAGES 0, 1, 3 fires no assertion, modes 1-4 at STAGES 0 fire the named ones.
+# Credit link: lint, then TB_credit_link built per (STAGES, MODE): modes 0 (STAGES 0, 1, 3) and 5 fire no assertion, modes 1-4 fire the named ones, 6-8 the named $fatal.
 CREDIT_SRC  = $(PRJ_DIR)/src/credit_link_if.sv $(PRJ_DIR)/src/credit_counter.sv $(PRJ_DIR)/src/credit_reg.sv $(PRJ_DIR)/src/credit_link_checker.sv
-CREDIT_CFGS = 0_0 1_0 3_0 0_1 0_2 0_3 0_4
+CREDIT_CFGS = 0_0 1_0 3_0 0_1 0_2 0_3 0_4 0_5
 CREDIT_RUNS = $(addprefix credit_run_,$(CREDIT_CFGS))
+CREDIT_FATALS = $(addprefix credit_fatal_,6 7 8)
 # expected assertions per mode; mode 4 must not trip the counter's own a_no_underflow
 CREDIT_WANT_1 = a_no_underflow
 CREDIT_WANT_2 = a_within_slots a_no_overflow
 CREDIT_WANT_3 = a_all_back
 CREDIT_WANT_4 = a_put_has_credit
 
-credit: credit_lint $(CREDIT_RUNS)
+credit: credit_lint $(CREDIT_RUNS) $(CREDIT_FATALS)
 
 credit_lint:
 	@w=0; e=0; for top in credit_counter credit_reg credit_link_checker; do \
@@ -52,9 +53,9 @@ $(CREDIT_RUNS): credit_run_%:
 	line=$$(command grep -m1 "^CREDIT_LINK STAGES=$$s MODE=$$m:" $$d.run.log); \
 	res=$$(command grep -c "^RESULT: PASSED" $$d.run.log); \
 	fails=$$(command grep -c "Assertion failed" $$d.run.log); \
-	if [ $$m -eq 0 ]; then \
+	if [ $$m -eq 0 ] || [ $$m -eq 5 ]; then \
 	  [ $$res -eq 1 ] && [ $$fails -eq 0 ] && echo "credit OK: $$line, 0 assertions fired" \
-	    || { echo "credit FAIL: STAGES=$$s MODE=0: $$res PASSED lines, $$fails assertions fired"; tail -20 $$d.run.log; exit 1; }; \
+	    || { echo "credit FAIL: STAGES=$$s MODE=$$m: $$res PASSED lines, $$fails assertions fired"; tail -20 $$d.run.log; exit 1; }; \
 	else \
 	  want="$(CREDIT_WANT_$(word 2,$(subst _, ,$*)))"; ok=1; msg=""; \
 	  for a in $$want; do n=$$(command grep -c "Assertion failed.*\.$$a:" $$d.run.log); msg="$$msg $$a x$$n"; [ $$n -ge 1 ] || ok=0; done; \
@@ -63,4 +64,16 @@ $(CREDIT_RUNS): credit_run_%:
 	    || { echo "credit FAIL: STAGES=$$s MODE=$$m: $$res PASSED lines, fired:$$msg"; tail -20 $$d.run.log; exit 1; }; \
 	fi
 
-.PHONY: pkg dump32 ipu credit credit_lint $(CREDIT_RUNS)
+# expected $fatal per mode: 6 and 7 stop the build (elaboration), 8 stops the simulation at time 0
+CREDIT_FATAL_6 = credit_counter: CRW
+CREDIT_FATAL_7 = credit_counter: MAX 0 must be at least 1
+CREDIT_FATAL_8 = credit_reg: DATA_W 31
+
+$(CREDIT_FATALS): credit_fatal_%:
+	@m=$*; d=$(PRJ_DIR)/Verilator/credit_fatal_m$$m; rm -rf $$d; want="$(CREDIT_FATAL_$*)"; \
+	if verilator $(FLAGS) --top-module TB_credit_link -GMODE=$$m --Mdir $$d $(CREDIT_SRC) $(TB_DIR)/TB_credit_link.sv -o sim > $$d.build.log 2>&1; then \
+	  $$d/sim > $$d.run.log 2>&1; log=$$d.run.log; else log=$$d.build.log; fi; \
+	line=$$(command grep -m1 -F "$$want" $$log); \
+	[ -n "$$line" ] && echo "credit OK: MODE=$$m fired: $$line" || { echo "credit FAIL: MODE=$$m: no '$$want'"; tail -20 $$log; exit 1; }
+
+.PHONY: pkg dump32 ipu credit credit_lint $(CREDIT_RUNS) $(CREDIT_FATALS)

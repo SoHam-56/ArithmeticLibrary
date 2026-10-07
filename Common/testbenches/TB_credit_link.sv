@@ -1,11 +1,13 @@
 `timescale 1ns / 100ps
 
 // Sends 0, 1, 2, ... up to ITEMS while it holds a credit and its random gate allows; VIOLATE puts once without a credit, BYPASS counts without credit_counter.
+// near_o / full_o count the cycles with a put and a credit together at count MAX-1 / MAX.
 module credit_tb_producer #(parameter int ITEMS = 1000, parameter int MAX = 32, parameter int SEED = 1, parameter bit VIOLATE = 0,
                             parameter bit BYPASS = 0, parameter int CRW = 6) (
     input logic clk_i, rstn_i,
     credit_link_if.producer lnk,
-    output logic done_o, injected_o
+    output logic done_o, injected_o,
+    output int near_o, full_o
 );
   localparam int CW = $clog2(MAX + 1);
   logic has_credit;
@@ -28,17 +30,20 @@ module credit_tb_producer #(parameter int ITEMS = 1000, parameter int MAX = 32, 
                                               .count_o(count));
   end
   always_ff @(posedge clk_i or negedge rstn_i)
-    if (!rstn_i) begin sent <= '0; lfsr <= 32'(SEED) | 32'h1; vdone <= 1'b0; end
+    if (!rstn_i) begin sent <= '0; lfsr <= 32'(SEED) | 32'h1; vdone <= 1'b0; near_o <= 0; full_o <= 0; end
     else begin
       lfsr <= {lfsr[30:0], lfsr[31] ^ lfsr[21] ^ lfsr[1] ^ lfsr[0]};
       if (lnk.put) sent <= sent + 1;
+      if (lnk.put && lnk.credit != '0 && int'(count) == MAX - 1) near_o <= near_o + 1;
+      if (lnk.put && lnk.credit != '0 && int'(count) == MAX) full_o <= full_o + 1;
       if (viol) vdone <= 1'b1;
     end
 endmodule
 
 // A SLOTS-deep FIFO: advertises SLOTS after reset, pops at a random rate, returns a credit per pop; OVER advertises one too many, LEAK keeps one credit.
+// SAME takes a put straight through when empty and returns its credit in the cycle of the put.
 module credit_tb_consumer #(parameter int SLOTS = 32, parameter int SEED = 7, parameter bit OVER = 0, parameter bit LEAK = 0,
-                            parameter int CRW = 6) (
+                            parameter bit SAME = 0, parameter int CRW = 6) (
     input logic clk_i, rstn_i,
     credit_link_if.consumer lnk,
     output logic [31:0] got_o,
@@ -52,28 +57,34 @@ module credit_tb_consumer #(parameter int SLOTS = 32, parameter int SEED = 7, pa
   logic adv;     // the one-cycle advertisement after reset
   logic leaked;  // the leak has happened
   wire pop = cnt != 0 && lfsr[2];
+  wire byp = SAME && !adv && cnt == 0 && lnk.put && lfsr[2];  // the put leaves in its own cycle
   wire keep = (LEAK || OVER) && !leaked;
   assign injected_o = OVER || leaked;
-  assign lnk.credit = adv ? CRW'(SLOTS + (OVER ? 1 : 0)) : CRW'(pop && !keep);  // the advertisement, then one credit per pop
+  assign lnk.credit = adv ? CRW'(SLOTS + (OVER ? 1 : 0)) : CRW'((pop || byp) && !keep);  // the advertisement, then one credit per pop
   always_ff @(posedge clk_i or negedge rstn_i)
     if (!rstn_i) begin wp <= '0; rp <= '0; cnt <= '0; got_o <= '0; err_o <= 1'b0; lfsr <= 32'(SEED) | 32'h1; adv <= 1'b1; leaked <= 1'b0; end
     else begin
       adv <= 1'b0;
       lfsr <= {lfsr[30:0], lfsr[31] ^ lfsr[21] ^ lfsr[1] ^ lfsr[0]};
-      if (lnk.put) begin
+      if (lnk.put && !byp) begin
         if (cnt == CW'(SLOTS) && !pop) err_o <= 1'b1;  // overrun
         mem[wp] <= lnk.data; wp <= wp + 1'b1;
+      end
+      if (byp) begin
+        if (lnk.data != got_o) err_o <= 1'b1;  // out of order or corrupted
+        got_o <= got_o + 1;
       end
       if (pop) begin
         if (mem[rp] != got_o) err_o <= 1'b1;  // out of order or corrupted
         got_o <= got_o + 1; rp <= rp + 1'b1;
         if (keep) leaked <= 1'b1;
       end
-      cnt <= cnt + CW'(lnk.put) - CW'(pop);
+      cnt <= cnt + CW'(lnk.put && !byp) - CW'(pop);
     end
 endmodule
 
 // LANES credit links with random rates and a checker at both ends, plus a hand-driven link that frees 3 slots in one cycle; MODE 0 is normal, 1-4 put one fault on lane 0.
+// MODE 5: every consumer returns a credit in the cycle of the put when empty (legal, counted at count MAX-1 and MAX); 6-8 stop at a $fatal.
 module TB_credit_link;
   parameter int LANES = 128, SLOTS = 32, ITEMS = 2000, STAGES = 0, MODE = 0;
   localparam int CRW = $clog2(SLOTS + 1);
@@ -82,15 +93,17 @@ module TB_credit_link;
   credit_link_if #(.DATA_W(32), .CRW(CRW)) lp[LANES] ();
   credit_link_if #(.DATA_W(32), .CRW(CRW)) lc[LANES] ();
   logic [LANES-1:0] pdone, perr_inj, cinj, err;
+  int near[LANES], full[LANES];
   logic [31:0] got[LANES];
   logic [LANES-1:0] drained;  // per lane: all its items delivered and the last credit back
   for (genvar i = 0; i < LANES; i++) begin : g_lane
     localparam bit FAULT = (i == 0);
     credit_tb_producer #(.ITEMS(ITEMS), .MAX(SLOTS), .SEED(i * 37 + 5), .VIOLATE(FAULT && (MODE == 1 || MODE == 4)),
                          .BYPASS(FAULT && MODE == 4), .CRW(CRW)) p (
-        .clk_i(clk), .rstn_i(rstn), .lnk(lp[i]), .done_o(pdone[i]), .injected_o(perr_inj[i]));
+        .clk_i(clk), .rstn_i(rstn), .lnk(lp[i]), .done_o(pdone[i]), .injected_o(perr_inj[i]), .near_o(near[i]), .full_o(full[i]));
     credit_reg #(.STAGES(STAGES), .DATA_W(32), .CRW(CRW)) r (.clk_i(clk), .rstn_i(rstn), .up(lp[i]), .dn(lc[i]));
-    credit_tb_consumer #(.SLOTS(SLOTS), .SEED(i * 11 + 3), .OVER(FAULT && MODE == 2), .LEAK(FAULT && MODE == 3), .CRW(CRW)) c (
+    credit_tb_consumer #(.SLOTS(SLOTS), .SEED(i * 11 + 3), .OVER(FAULT && MODE == 2), .LEAK(FAULT && MODE == 3), .SAME(MODE == 5),
+                         .CRW(CRW)) c (
         .clk_i(clk), .rstn_i(rstn), .lnk(lc[i]), .got_o(got[i]), .err_o(err[i]), .injected_o(cinj[i]));
     int settle;
     always_ff @(posedge clk or negedge rstn)
@@ -101,6 +114,20 @@ module TB_credit_link;
       end
     credit_link_checker #(.SLOTS(SLOTS)) chk_p (.clk_i(clk), .rstn_i(rstn), .drained_i(drained[i]), .lnk(lp[i]));
     credit_link_checker #(.SLOTS(SLOTS)) chk_c (.clk_i(clk), .rstn_i(rstn), .drained_i(drained[i]), .lnk(lc[i]));
+  end
+
+  // Elaboration and time-0 checks, one per mode: a credit wider than the count, MAX 0, a credit_reg narrower than its links.
+  if (MODE == 6) begin : g_bad_crw
+    credit_counter #(.MAX(SLOTS), .CRW(CRW + 1)) cc (.clk_i(clk), .rstn_i(rstn), .put_i(1'b0), .credit_i('0), .has_credit_o(), .count_o());
+  end else if (MODE == 7) begin : g_bad_max
+    credit_counter #(.MAX(0), .CRW(1)) cc (.clk_i(clk), .rstn_i(rstn), .put_i(1'b0), .credit_i(1'b0), .has_credit_o(), .count_o());
+  end else if (MODE == 8) begin : g_bad_reg
+    credit_link_if #(.DATA_W(32), .CRW(CRW)) wu ();
+    credit_link_if #(.DATA_W(32), .CRW(CRW)) wd ();
+    credit_reg #(.STAGES(1), .DATA_W(31), .CRW(CRW)) r (.clk_i(clk), .rstn_i(rstn), .up(wu), .dn(wd));
+    assign wu.put = 1'b0;
+    assign wu.data = '0;
+    assign wd.credit = '0;
   end
 
   // The hand-driven link: the testbench puts and grants, a credit_counter at the producer end counts.
@@ -142,10 +169,14 @@ module TB_credit_link;
     expect_count("after a put with 3 slots freed", SLOTS - 3);
     bc.credit <= CRW'(3); cycles(1); bc.credit <= '0;          // the last 3 slots back
     expect_count("all slots back", SLOTS);
+    if (MODE == 5 && STAGES == 0) begin
+      bp.put <= 1; bc.credit <= CRW'(1); cycles(1); bp.put <= 0; bc.credit <= '0;  // a put at MAX whose credit comes back in its own cycle
+      expect_count("a put at MAX credited in its cycle", SLOTS);
+    end
     burst_done = 1; bdrained = 1;
   end
 
-  int cyc, done_lanes, bad, injected;
+  int cyc, done_lanes, bad, injected, near_all, full_all;
   initial begin
     repeat (3) @(posedge clk);
     @(negedge clk);
@@ -157,19 +188,25 @@ module TB_credit_link;
       done_lanes = 0;
       for (int i = 0; i < LANES; i++) if (got[i] == ITEMS) done_lanes++;
       // in the fault modes the run ends with lane 0, so its assertions fire a bounded number of times
-      if ((MODE == 0 ? done_lanes == LANES : got[0] == ITEMS) && burst_done) break;
+      if ((MODE == 0 || MODE == 5 ? done_lanes == LANES : got[0] == ITEMS) && burst_done) break;
     end
     repeat (STAGES + 8) @(posedge clk);  // every finished lane has been drained for a few cycles
     bad = 0;
     for (int i = 0; i < LANES; i++) if (err[i] || got[i] != ITEMS) bad++;  // meaningful in mode 0 only
     injected = int'($countones(perr_inj)) + int'($countones(cinj));
-    if (MODE == 0)
+    near_all = 0; full_all = 0;
+    for (int i = 0; i < LANES; i++) begin near_all += near[i]; full_all += full[i]; end
+    if (MODE == 5)
+      $display("CREDIT_LINK STAGES=%0d MODE=%0d: %0d lanes delivered %0d items in order, %0d bad, burst link %0d bad, %0d cycles; a put with a credit in the same cycle at count MAX-1 %0d times, at MAX %0d times",
+               STAGES, MODE, LANES - bad, ITEMS, bad, burst_bad, cyc, near_all, full_all);
+    else if (MODE == 0)
       $display("CREDIT_LINK STAGES=%0d MODE=%0d: %0d lanes delivered %0d items in order, %0d bad, burst link %0d bad, %0d cycles",
                STAGES, MODE, LANES - bad, ITEMS, bad, burst_bad, cyc);
     else
       $display("CREDIT_LINK STAGES=%0d MODE=%0d: %0d fault(s) injected, burst link %0d bad, %0d cycles",
                STAGES, MODE, injected, burst_bad, cyc);
     if (MODE == 0) $display("RESULT: %s", (bad == 0 && burst_bad == 0 && burst_done) ? "PASSED" : "FAILED");
+    else if (MODE == 5) $display("RESULT: %s", (bad == 0 && burst_bad == 0 && burst_done && near_all > 0 && full_all > 0) ? "PASSED" : "FAILED");
     else $display("RESULT: %s", (injected > 0 && burst_bad == 0 && burst_done) ? "PASSED" : "FAILED");
     $finish;
   end

@@ -1,6 +1,7 @@
 `timescale 1ns / 100ps
 
 // One credit link: the consumer grants credits (one per free slot), the producer spends one per put.
+// Both ends share one reset: an advertisement made while the other end is in reset is lost.
 /* verilator lint_off UNUSEDSIGNAL */
 interface credit_link_if #(parameter int DATA_W = 32, parameter int CRW = 1);
   logic              put;     // producer: one item this cycle
