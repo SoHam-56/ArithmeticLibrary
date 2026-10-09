@@ -15,8 +15,6 @@ module fp32Multiplier (
     output reg invalid_o     // High on 0*Inf or sNaN input
 );
 
-  localparam INT_SYNC_DELAY = 1;
-
   logic s1_valid;
   logic s1_sign_a, s1_sign_b;
   logic [7:0] s1_exp_a, s1_exp_b;
