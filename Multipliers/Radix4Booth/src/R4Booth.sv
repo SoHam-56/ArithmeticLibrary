@@ -70,26 +70,6 @@ module R4Booth #(
   // ---------------------------------------------------------
   // Pipeline Stage 2: Summation (Adder Tree)
   // ---------------------------------------------------------
-  logic [(2*N)-1:0] sum_final;
-  logic valid_s2;
-
-  always_ff @(posedge clk_i or negedge rstn_i) begin
-    if (!rstn_i) begin
-      sum_final <= '0;
-      valid_s2  <= 0;
-    end else begin
-      valid_s2  <= valid_s1;
-
-      // Sum all partial products
-      sum_final <= '0;
-      for (int k = 0; k < NUM_PP; k++) begin
-        if (k == 0) sum_final <= pp_reg[k];
-        else sum_final <= sum_final + pp_reg[k];
-      end
-    end
-  end
-
-
   logic [(2*N)-1:0] adder_tree_comb;
   always_comb begin
     adder_tree_comb = '0;
