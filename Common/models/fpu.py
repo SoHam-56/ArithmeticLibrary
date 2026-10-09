@@ -1,6 +1,7 @@
 """Bit-exact models of AriL's float units, vectorized: fpMultiplier and fpAdder at any (EXP_W, MAN_W), and at (8, 23)
 fp32Multiplier and fp32Adder. Operands and results are bit patterns in int64 arrays; each op returns (result, overflow,
-underflow, invalid). Truncating; subnormal inputs read as zero; tiny results flush to a signed zero; NaN is canonical."""
+underflow, invalid). Truncating; subnormal inputs read as zero; tiny results flush to a signed zero; NaN is canonical.
+Also fpMulWiden (mul_widen), the exact widening to fp32 (widen) and fpNarrow, fp32 to f rounded to nearest even (narrow)."""
 import numpy as np
 
 
@@ -107,3 +108,26 @@ def add(f: Fmt, a, b, fp32_overflow_quirk: bool = False):
                     default=sz | ((ne & f.emax) << f.m) | ((nm >> 3) & f.mmask))
     un = ~nan & ~inf & ~zero & under
     return res, ov, un, invalid
+
+
+def widen(f: Fmt, x):
+    """sienna_fmt_pkg::widen: an 8-exponent-bit float's bits to fp32 bits, exactly."""
+    return np.asarray(x, dtype=np.int64) << (23 - f.m)
+
+
+def mul_widen(f: Fmt, a, b):
+    """fpMulWiden: the exact fp32 product of two f operands, as fp32Multiplier on the widened operands."""
+    return mul(FP32, widen(f, a), widen(f, b))
+
+
+def narrow(f: Fmt, x):
+    """fpNarrow: fp32 bits to f, round to nearest even; NaN -> f.qnan; exponent 0 -> signed zero; overflow -> infinity."""
+    x = np.asarray(x, dtype=np.int64)
+    sh = 23 - f.m
+    if sh == 0:
+        return x
+    s, e = (x >> 31) & 1, (x >> 23) & 0xFF
+    nan = (e == 0xFF) & ((x & 0x7FFFFF) != 0)
+    r = (x + (1 << (sh - 1)) - 1 + ((x >> sh) & 1)) >> sh  # RNE on the magnitude bits; a carry into the exponent is right
+    r = np.where(e == 0, s << (f.w - 1), r)  # zero and subnormal -> signed zero
+    return np.where(nan, f.qnan, r).astype(np.int64)

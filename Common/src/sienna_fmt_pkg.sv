@@ -18,9 +18,27 @@ package sienna_fmt_pkg;
     return ((exp_w == 8) && ((man_w == 23) || (man_w == 7))) || ((exp_w == 0) && (man_w == 7));
   endfunction
 
-  // Width of partial sums, the reducer, the bias and the mesh result: int32 for int8, the format itself for floats.
+  // Width of products, partial sums, the reducer and the bias: int32 for int8, fp32 for every float format.
   function automatic int acc_w(input int exp_w, input int man_w);
+    return 32;
+  endfunction
+
+  // Width of a mesh result word as it leaves the reducer: int32 for int8 (requantized later), the format itself for floats.
+  function automatic int out_w(input int exp_w, input int man_w);
     return is_int(exp_w) ? 32 : 1 + exp_w + man_w;
+  endfunction
+
+  // The accumulator's own format: fp32 (8, 23) for every float, int32 for int8.
+  function automatic int acc_exp_w(input int exp_w, input int man_w);
+    return is_int(exp_w) ? 0 : 8;
+  endfunction
+  function automatic int acc_man_w(input int exp_w, input int man_w);
+    return is_int(exp_w) ? 31 : 23;
+  endfunction
+
+  // An 8-exponent-bit float widened to fp32 bits, exactly.
+  function automatic logic [31:0] widen(input logic [31:0] x, input int man_w);
+    return x << (23 - man_w);
   endfunction
 
   // valid_i to done_o: intMultiplier 1; Karatsuba product (fp32Multiplier, fpMultiplier above 12 significand bits) 8, else 3.

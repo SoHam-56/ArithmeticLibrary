@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-# Common AriL checks: the format package, the fp32 units dumped for the Python model, the integer model ipu.py, and the credit link modules.
+# Common AriL checks: the format package, the fp32 units dumped for the Python model, the models fpu.py (narrow, widen) and ipu.py, and the credit link modules.
 PRJ_DIR = $(shell pwd)
 ARIL    = $(PRJ_DIR)/..
 TB_DIR  = $(PRJ_DIR)/testbenches
@@ -22,6 +22,9 @@ dump32:
 
 ipu:
 	python3 $(PRJ_DIR)/models/test_ipu.py
+
+fpu:
+	python3 $(PRJ_DIR)/models/test_fpu.py
 
 # Credit link: lint, then TB_credit_link built per (STAGES, MODE): modes 0 (STAGES 0, 1, 3) and 5 fire no assertion, modes 1-4 fire the named ones, 6-8 the named $fatal.
 CREDIT_SRC  = $(PRJ_DIR)/src/credit_link_if.sv $(PRJ_DIR)/src/credit_counter.sv $(PRJ_DIR)/src/credit_reg.sv $(PRJ_DIR)/src/credit_link_checker.sv
@@ -76,4 +79,4 @@ $(CREDIT_FATALS): credit_fatal_%:
 	line=$$(command grep -m1 -F "$$want" $$log); \
 	[ -n "$$line" ] && echo "credit OK: MODE=$$m fired: $$line" || { echo "credit FAIL: MODE=$$m: no '$$want'"; tail -20 $$log; exit 1; }
 
-.PHONY: pkg dump32 ipu credit credit_lint $(CREDIT_RUNS) $(CREDIT_FATALS)
+.PHONY: pkg dump32 ipu fpu credit credit_lint $(CREDIT_RUNS) $(CREDIT_FATALS)

@@ -4,6 +4,7 @@
 // The product of two significands of MAN_W+1 bits fits fp32's 24, so for MAN_W <= 10 (bf16, fp16) it is exact.
 // Same ports, flags and special-value handling as fp32Multiplier: subnormal inputs read as zero, underflow
 // flushes to a signed zero, overflow gives infinity, any NaN gives 7FC00000. valid_i at t, done_o at t+3.
+// Only the valid chain (s1_v, s2_v, done_o) is reset (D-8); the flags are zero in every cycle without done_o.
 module fpMulWiden #(
     parameter int EXP_W = 8,  // bf16: 8 and 7; fp16: 5 and 10
     parameter int MAN_W = 7,
@@ -37,30 +38,26 @@ module fpMulWiden #(
   logic [SIG_W-1:0] s1_sa, s1_sb;
 
   always_ff @(posedge clk_i or negedge rstn_i) begin
-    if (!rstn_i) begin
-      s1_v <= 1'b0;
-      {s1_sign, s1_nan, s1_inf, s1_zero, s1_invalid} <= '0;
-      s1_exp <= '0;
-      s1_sa <= '0;
-      s1_sb <= '0;
-    end else begin
-      s1_v <= valid_i;
-      if (valid_i) begin
-        automatic logic [EXP_W-1:0] ea = A[W-2:MAN_W], eb = B[W-2:MAN_W];
-        automatic logic zero_a = (ea == '0), zero_b = (eb == '0);
-        automatic logic inf_a = (ea == EXP_ONES) && (A[MAN_W-1:0] == '0), inf_b = (eb == EXP_ONES) && (B[MAN_W-1:0] == '0);
-        automatic logic nan_a = (ea == EXP_ONES) && (A[MAN_W-1:0] != '0), nan_b = (eb == EXP_ONES) && (B[MAN_W-1:0] != '0);
-        automatic logic snan = (nan_a && !A[MAN_W-1]) || (nan_b && !B[MAN_W-1]);
-        automatic logic inv = (zero_a && inf_b) || (inf_a && zero_b);
-        s1_sign    <= A[W-1] ^ B[W-1];
-        s1_nan     <= nan_a || nan_b || inv;
-        s1_invalid <= inv || snan;
-        s1_inf     <= inf_a || inf_b;
-        s1_zero    <= zero_a || zero_b;
-        s1_exp     <= $signed({4'b0, ea}) + $signed({4'b0, eb}) - 12'(2 * BIAS) + 12'sd127;
-        s1_sa      <= {1'b1, A[MAN_W-1:0]};
-        s1_sb      <= {1'b1, B[MAN_W-1:0]};
-      end
+    if (!rstn_i) s1_v <= 1'b0;
+    else s1_v <= valid_i;
+  end
+
+  always_ff @(posedge clk_i) begin
+    if (valid_i) begin
+      automatic logic [EXP_W-1:0] ea = A[W-2:MAN_W], eb = B[W-2:MAN_W];
+      automatic logic zero_a = (ea == '0), zero_b = (eb == '0);
+      automatic logic inf_a = (ea == EXP_ONES) && (A[MAN_W-1:0] == '0), inf_b = (eb == EXP_ONES) && (B[MAN_W-1:0] == '0);
+      automatic logic nan_a = (ea == EXP_ONES) && (A[MAN_W-1:0] != '0), nan_b = (eb == EXP_ONES) && (B[MAN_W-1:0] != '0);
+      automatic logic snan = (nan_a && !A[MAN_W-1]) || (nan_b && !B[MAN_W-1]);
+      automatic logic inv = (zero_a && inf_b) || (inf_a && zero_b);
+      s1_sign    <= A[W-1] ^ B[W-1];
+      s1_nan     <= nan_a || nan_b || inv;
+      s1_invalid <= inv || snan;
+      s1_inf     <= inf_a || inf_b;
+      s1_zero    <= zero_a || zero_b;
+      s1_exp     <= $signed({4'b0, ea}) + $signed({4'b0, eb}) - 12'(2 * BIAS) + 12'sd127;
+      s1_sa      <= {1'b1, A[MAN_W-1:0]};
+      s1_sb      <= {1'b1, B[MAN_W-1:0]};
     end
   end
 
@@ -70,18 +67,15 @@ module fpMulWiden #(
   logic [PW-1:0] s2_p;
 
   always_ff @(posedge clk_i or negedge rstn_i) begin
-    if (!rstn_i) begin
-      s2_v <= 1'b0;
-      {s2_sign, s2_nan, s2_inf, s2_zero, s2_invalid} <= '0;
-      s2_exp <= '0;
-      s2_p <= '0;
-    end else begin
-      s2_v <= s1_v;
-      if (s1_v) begin
-        {s2_sign, s2_nan, s2_inf, s2_zero, s2_invalid} <= {s1_sign, s1_nan, s1_inf, s1_zero, s1_invalid};
-        s2_exp <= s1_exp;
-        s2_p   <= PW'(s1_sa) * PW'(s1_sb);
-      end
+    if (!rstn_i) s2_v <= 1'b0;
+    else s2_v <= s1_v;
+  end
+
+  always_ff @(posedge clk_i) begin
+    if (s1_v) begin
+      {s2_sign, s2_nan, s2_inf, s2_zero, s2_invalid} <= {s1_sign, s1_nan, s1_inf, s1_zero, s1_invalid};
+      s2_exp <= s1_exp;
+      s2_p   <= PW'(s1_sa) * PW'(s1_sb);
     end
   end
 
@@ -94,30 +88,26 @@ module fpMulWiden #(
   end
 
   always_ff @(posedge clk_i or negedge rstn_i) begin
-    if (!rstn_i) begin
-      result_o    <= '0;
-      done_o      <= 1'b0;
-      overflow_o  <= 1'b0;
-      underflow_o <= 1'b0;
-      invalid_o   <= 1'b0;
-    end else begin
-      done_o      <= s2_v;
-      overflow_o  <= 1'b0;
-      underflow_o <= 1'b0;
-      invalid_o   <= 1'b0;
-      if (s2_v) begin
-        invalid_o <= s2_invalid;
-        if (s2_nan) result_o <= 32'h7FC00000;
-        else if (s2_inf) result_o <= {s2_sign, 8'hFF, 23'd0};
-        else if (s2_zero) result_o <= {s2_sign, 31'd0};
-        else if (n_exp >= 12'sd255) begin
-          result_o   <= {s2_sign, 8'hFF, 23'd0};
-          overflow_o <= 1'b1;
-        end else if (n_exp <= 12'sd0) begin
-          result_o    <= {s2_sign, 31'd0};
-          underflow_o <= 1'b1;
-        end else result_o <= {s2_sign, 8'(n_exp), n_man};
-      end
+    if (!rstn_i) done_o <= 1'b0;
+    else done_o <= s2_v;
+  end
+
+  always_ff @(posedge clk_i) begin
+    overflow_o  <= 1'b0;
+    underflow_o <= 1'b0;
+    invalid_o   <= 1'b0;
+    if (s2_v) begin
+      invalid_o <= s2_invalid;
+      if (s2_nan) result_o <= 32'h7FC00000;
+      else if (s2_inf) result_o <= {s2_sign, 8'hFF, 23'd0};
+      else if (s2_zero) result_o <= {s2_sign, 31'd0};
+      else if (n_exp >= 12'sd255) begin
+        result_o   <= {s2_sign, 8'hFF, 23'd0};
+        overflow_o <= 1'b1;
+      end else if (n_exp <= 12'sd0) begin
+        result_o    <= {s2_sign, 31'd0};
+        underflow_o <= 1'b1;
+      end else result_o <= {s2_sign, 8'(n_exp), n_man};
     end
   end
 

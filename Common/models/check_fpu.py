@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Checks a float-unit dump (a b result flags per line; flags are ov un inv as binary digits) against fpu.py, bit for bit."""
+"""Checks a float-unit dump (a b result flags per line; flags are ov un inv as binary digits; fpNarrow: x y) against fpu.py, bit for bit."""
 import argparse
 import os
 import sys
@@ -13,12 +13,22 @@ import fpu  # noqa: E402
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("dump")
-    p.add_argument("--unit", choices=["mul", "add"], required=True)
+    p.add_argument("--unit", choices=["mul", "add", "narrow"], required=True)
     p.add_argument("--format", choices=sorted(fpu.FORMATS), required=True)
     p.add_argument("--fp32-unit", action="store_true", help="the dump came from fp32Adder (its overflow flag, D-1)")
     a = p.parse_args()
     f = fpu.FORMATS[a.format]
     rows = [ln.split() for ln in open(a.dump) if ln.strip()]
+    if a.unit == "narrow":
+        X = np.array([int(r[0], 16) for r in rows], dtype=np.int64)
+        Y = np.array([int(r[1], 16) for r in rows], dtype=np.int64)
+        want = fpu.narrow(f, X)
+        bad = np.nonzero(Y != want)[0]
+        d = (f.w + 3) // 4
+        print(f"narrow {a.format}: {len(rows)} results checked against fpu.py, {len(bad)} mismatches")
+        for i in bad[:20]:
+            print(f"  {X[i]:08x}: rtl {Y[i]:0{d}x}, model {want[i]:0{d}x}")
+        sys.exit(1 if len(bad) or not rows else 0)
     A = np.array([int(r[0], 16) for r in rows], dtype=np.int64)
     B = np.array([int(r[1], 16) for r in rows], dtype=np.int64)
     R = np.array([int(r[2], 16) for r in rows], dtype=np.int64)
