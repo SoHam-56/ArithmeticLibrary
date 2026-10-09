@@ -16,7 +16,9 @@ module fpNarrow #(
     assign y_o = x_i;
   end else begin : G_NARROW
     logic nan, tiny;
+    /* verilator lint_off UNUSEDSIGNAL */  // r's bits above W are zero after the shift
     logic [31:0] r;
+    /* verilator lint_on UNUSEDSIGNAL */
     assign nan  = (x_i[30:23] == 8'hFF) && (x_i[22:0] != '0);
     assign tiny = (x_i[30:23] == 8'h00);
     assign r    = (x_i + ((32'd1 << (SH - 1)) - 32'd1) + 32'((x_i >> SH) & 32'd1)) >> SH;  // carries into the exponent, and to infinity

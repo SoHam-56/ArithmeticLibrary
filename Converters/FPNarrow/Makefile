@@ -30,7 +30,7 @@ lint:
 	@w=0; e=0; for m in 7 23; do \
 	  verilator --lint-only -Wall -Wno-fatal -DSYNTHESIS --top-module fpNarrow -GMAN_W=$$m $(DESIGN) > $(V)/lint_$$m.log 2>&1; \
 	  w=$$((w + $$(command grep -c '^%Warning' $(V)/lint_$$m.log))); e=$$((e + $$(command grep -c '^%Error' $(V)/lint_$$m.log))); \
-	done; echo "fpNarrow lint (MAN_W 7, 23): $$w warnings, $$e errors"; cat $(V)/lint_*.log; [ $$e -eq 0 ]
+	done; echo "fpNarrow lint (MAN_W 7, 23): $$w warnings, $$e errors"; cat $(V)/lint_*.log; [ $$w -eq 0 ] && [ $$e -eq 0 ]
 
 # EXP_W 5 (fp16) must stop the build at G_BAD_FORMAT
 bad_format:

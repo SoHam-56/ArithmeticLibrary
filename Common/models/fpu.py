@@ -122,7 +122,7 @@ def mul_widen(f: Fmt, a, b):
 
 def narrow(f: Fmt, x):
     """fpNarrow: fp32 bits to f, round to nearest even; NaN -> f.qnan; exponent 0 -> signed zero; overflow -> infinity."""
-    x = np.asarray(x, dtype=np.int64)
+    x = np.asarray(x, dtype=np.int64) & 0xFFFFFFFF  # a sign-extended int32 caller reads as its 32 bits
     sh = 23 - f.m
     if sh == 0:
         return x

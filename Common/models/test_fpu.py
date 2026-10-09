@@ -74,6 +74,9 @@ def main() -> None:
     check("narrow corners", fpu.narrow(fpu.BF16, xs), [c[1] for c in NARROW_BF16])
     check("narrow corners vs rne_ref", fpu.narrow(fpu.BF16, xs), rne_ref(xs))
     check("narrow fp32 is the identity", fpu.narrow(fpu.FP32, xs), xs)
+    sx = xs.astype(np.uint32).view(np.int32)  # a sign-extended int32 caller
+    check(f"narrow corners from int32 ({int((sx < 0).sum())} negative)", fpu.narrow(fpu.BF16, sx), [c[1] for c in NARROW_BF16])
+    check("narrow fp32 identity from int32", fpu.narrow(fpu.FP32, sx), xs)
 
     every = np.arange(1 << 16, dtype=np.int64)
     e = (every >> 7) & 0xFF
