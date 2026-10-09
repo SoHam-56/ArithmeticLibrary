@@ -4,10 +4,9 @@ PRJ_DIR = $(shell pwd)
 SRC_DIR = $(PRJ_DIR)/src
 TB_DIR  = $(PRJ_DIR)/testbenches
 
-# --- SoftFloat Configuration ---
-SOFTFLOAT_BASE = $(TB_DIR)/berkeley-softfloat-3
+# --- SoftFloat Configuration: the one vendored copy, under Adders/FP32 ---
+SOFTFLOAT_BASE = $(PRJ_DIR)/../../Adders/FP32/testbenches/berkeley-softfloat-3
 SOFTFLOAT_INC  = $(SOFTFLOAT_BASE)/source/include
-# Note: This path matches the one you provided
 SOFTFLOAT_LIB  = $(SOFTFLOAT_BASE)/build/Linux-x86_64-GCC/softfloat.a
 
 VERILATOR = verilator

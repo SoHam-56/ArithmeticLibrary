@@ -1,5 +1,5 @@
 -I
-testbenches/berkeley-softfloat-3/source/include
+../../Adders/FP32/testbenches/berkeley-softfloat-3/source/include
 -I
 /usr/share/verilator/include/vltstd
 -I

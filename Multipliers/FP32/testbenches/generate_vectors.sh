@@ -6,7 +6,7 @@
 # Usage: ./generate_vectors.sh
 # ==============================================================================
 
-SOFTFLOAT_DIR="./berkeley-softfloat-3"
+SOFTFLOAT_DIR="../../../Adders/FP32/testbenches/berkeley-softfloat-3"  # the one vendored copy; run from this directory
 INCLUDE_DIR="$SOFTFLOAT_DIR/source/include"
 LIB_PATH="$SOFTFLOAT_DIR/build/Linux-x86_64-GCC/softfloat.a"
 SOURCE_FILE="gen_vectors.cpp"
