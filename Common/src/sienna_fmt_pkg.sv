@@ -13,7 +13,7 @@ package sienna_fmt_pkg;
     return exp_w == 0;
   endfunction
 
-  // fp32 (fp32Multiplier, fp32Adder), bf16 (fpMultiplier, fpAdder) and int8 (intMultiplier, intAdder); nothing else is verified.
+  // fp32 (fp32Multiplier, fp32Adder), bf16 (mesh fpMulWiden, fp32Adder, fpNarrow; lanes and dropout fpMultiplier, fpAdder) and int8 (intMultiplier, intAdder); nothing else is verified.
   function automatic bit supported(input int exp_w, input int man_w);
     return ((exp_w == 8) && ((man_w == 23) || (man_w == 7))) || ((exp_w == 0) && (man_w == 7));
   endfunction
