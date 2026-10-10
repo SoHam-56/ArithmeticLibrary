@@ -4,3 +4,4 @@ VCS/
 gen_vectors
 *.o
 *.a
+results/

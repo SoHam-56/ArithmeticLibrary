@@ -1,4 +1,20 @@
-# Vivado DPI Linker Fix
+# ArithmeticLibrary
+
+Arithmetic units in SystemVerilog (fp32, bf16 and int8 adders and multipliers, a fixed-point MAC, the TFLite requantizer, the fp32-to-bf16 narrower, credit links), each with a bench against a reference (SoftFloat, a C model through DPI, or the Python models in `Common/models`).
+
+## Regression
+
+```bash
+make regression          # every unit bench and model check once, then one table (make -j4 runs four at a time)
+make regression/Adders/FP/check   # one point; python3 regression.py --action points lists them
+make regression-summary  # the table again, from results/regression/
+```
+
+Each point runs in a private copy of the tree and passes only on its own verdict (the bench's `RESULT: PASSED`, the model check's 0 mismatches, a clean lint), never on a clean exit alone. The regression fails if any point fails or did not run. Each unit's Makefile still runs its benches alone, e.g. `make -C Adders/FP check`.
+
+`Common/regress.py` is the regression engine every repo that holds this library uses for its own `make regression`.
+
+## Vivado DPI Linker Fix
 
 This guide outlines how to configure Xilinx Vivado to use the host system's modern linker instead of its bundled, outdated version. This is often necessary when working with SystemVerilog DPI (Direct Programming Interface) and modern C++ standards.
 
