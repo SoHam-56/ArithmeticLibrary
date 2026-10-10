@@ -29,11 +29,14 @@ TOP_MODULE = TB_fp32Multiplier
 VERILATOR_DIR = $(PRJ_DIR)/Verilator
 VCS_DIR       = $(PRJ_DIR)/VCS
 
+# Simulation threads; several simulations at once each need fewer (Verilator's threads spin, so oversubscribed runs crawl).
+SIM_THREADS ?= $(shell nproc)
+
 VERILATOR_FLAGS = \
     --trace \
     --timing \
     --top-module $(TOP_MODULE) \
-    --threads $(shell nproc) \
+    --threads $(SIM_THREADS) \
     --sv \
     --autoflush \
     -I$(SRC_DIR) \
