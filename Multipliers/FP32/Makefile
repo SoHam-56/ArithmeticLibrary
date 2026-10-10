@@ -81,7 +81,7 @@ help:
 	@echo "  FILES:      $(words $(DESIGN_FILES)) Source files"
 
 
-verilator: check-files
+verilator: $(SOFTFLOAT_LIB) check-files
 	@echo "=== Verilator simulation for $(TOP_MODULE) ==="
 	@mkdir -p $(VERILATOR_DIR)
 	@echo "-- Compiling RTL..."
@@ -99,7 +99,7 @@ verilator: check-files
 	@echo "-- Trace file: $(VERILATOR_DIR)/dump.vcd"
 
 
-vcs: check-files
+vcs: $(SOFTFLOAT_LIB) check-files
 	@echo "=== VCS simulation for $(TOP_MODULE) ==="
 	@mkdir -p $(VCS_DIR)
 	$(VCS) $(VCS_FLAGS) \
@@ -132,7 +132,7 @@ lint:
 		$(TB_DIR)/$(TESTBENCH)
 	@echo "-- Lint check complete"
 
-check-files:
+check-files: $(SOFTFLOAT_LIB)
 	@echo "=== Checking source files ==="
 	@missing=0; \
 	for file in $(DESIGN_FILES) $(TB_DIR)/$(TESTBENCH) $(CPP_FILES) $(SOFTFLOAT_LIB); do \
@@ -156,3 +156,7 @@ clean:
 	@echo "-- Clean complete"
 
 .PHONY: default help verilator vcs wave lint check-files clean
+
+# SoftFloat builds on first use: a fresh clone has only its sources, and softfloat.a is ignored.
+$(SOFTFLOAT_LIB):
+	$(MAKE) -C $(SOFTFLOAT_BASE)/build/Linux-x86_64-GCC
