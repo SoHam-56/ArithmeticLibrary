@@ -74,7 +74,8 @@ def marker_verdict(text: str, rc, need=(), bad=(), firing=True) -> str:
     for b in bad:
         m = re.search(b, text, re.M)
         if m:
-            return f"FAIL (log: {m.group(0).strip()[:60]})"
+            line = text[text.rfind("\n", 0, m.start()) + 1:(text.find("\n", m.end()) + 1 or len(text) + 1) - 1]  # the whole line it is on
+            return f"FAIL (log: {line.strip()[:60]})"
     for n in need:
         if not re.search(n, text, re.M):
             return f"FAIL (no '{n.strip('^$')}')"

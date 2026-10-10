@@ -152,6 +152,7 @@ def test_verdict_rules():
     assert v("RESULT: PASSED\n", 0, TB, TB_BAD) == "PASS" and v("RESULT: PASSED\n", 2, TB, TB_BAD) == "FAIL (exit 2)"
     assert v("done\n", 0, TB, TB_BAD) == "FAIL (no 'RESULT: PASSED')"  # finishing cleanly is not a pass
     assert v("RESULT: PASSED\nRESULT: FAILED\n", 0, TB, TB_BAD) == "FAIL (log: RESULT: FAILED)"  # the benches exit 0 when they fail
+    assert v("RESULT: PASSED\nlane 3 RESULT: FAILED at 7\n", 0, TB, TB_BAD) == "FAIL (log: lane 3 RESULT: FAILED at 7)"  # the whole line, not the match
     assert v("\x1b[92mRESULT: PASSED\x1b[0m\n", 0, TB, TB_BAD) == "PASS"
     assert v("RESULT: PASSED\n[x] Assertion failed in t\n", 0, TB, TB_BAD) == "FAIL (log: [x] Assertion failed in t)"
     assert v("%Error: bad\nREJECTED\n", 0, (r"^REJECTED$",), (), False) == "PASS" and v("%Error: bad\nREJECTED\n", 0, (r"^REJECTED$",)) == "FAIL (log: %Error: bad)"
