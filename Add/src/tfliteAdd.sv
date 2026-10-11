@@ -139,7 +139,7 @@ module tfliteAdd #(
       s1_bad <= !((s1_i >= -8'sd31) && (s1_i <= 8'sd0) && (s2_i >= -8'sd31) && (s2_i <= 8'sd0) && (so_i >= -8'sd31) && (so_i <= 8'sd0));
       {s1_sh1, s1_sh2, s1_sho} <= {s1_i, s2_i, so_i};
     end
-  // Checked on the stage-1 registers while v1 marks a real beat, never on the host's inputs at the edge.
+  // Checked on the stage-1 registers while v1 marks a real beat; rstn_i stays since v1 powers up random before the first reset edge (rs1_g1b_riseeds).
   always @(posedge clk_i)
     if (rstn_i && v1)
       assert (!s1_bad)
