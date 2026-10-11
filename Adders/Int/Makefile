@@ -31,6 +31,6 @@ vectors:
 	$(COMMON)/testbenches/generate_int_vectors.sh
 
 lint:
-	$(COMMON)/lint.sh "lint intAdder" -Wall -Wno-fatal -DSYNTHESIS --top-module intAdder $(RTL)
+	bash $(COMMON)/lint.sh "lint intAdder" -Wall -Wno-fatal -DSYNTHESIS --top-module intAdder $(RTL)
 
 .PHONY: build verilator check vivado_tb vectors lint

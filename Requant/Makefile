@@ -34,8 +34,8 @@ vectors:
 	$(GEN) $(TB_DIR)/vectors_single.mem --rounding SINGLE --random 10000
 
 lint:
-	$(COMMON)/lint.sh "lint tfliteRequant ROUNDING=DOUBLE" -Wall -Wno-fatal -DSYNTHESIS --top-module tfliteRequant -GROUNDING='"DOUBLE"' $(PKG) $(DESIGN)
-	$(COMMON)/lint.sh "lint tfliteRequant ROUNDING=SINGLE" -Wall -Wno-fatal -DSYNTHESIS --top-module tfliteRequant -GROUNDING='"SINGLE"' $(PKG) $(DESIGN)
+	bash $(COMMON)/lint.sh "lint tfliteRequant ROUNDING=DOUBLE" -Wall -Wno-fatal -DSYNTHESIS --top-module tfliteRequant -GROUNDING='"DOUBLE"' $(PKG) $(DESIGN)
+	bash $(COMMON)/lint.sh "lint tfliteRequant ROUNDING=SINGLE" -Wall -Wno-fatal -DSYNTHESIS --top-module tfliteRequant -GROUNDING='"SINGLE"' $(PKG) $(DESIGN)
 
 lint_bad:
 	@verilator --lint-only -Wno-fatal -Werror-USERFATAL --top-module tfliteRequant -GROUNDING='"NEAREST"' $(PKG) $(DESIGN) \

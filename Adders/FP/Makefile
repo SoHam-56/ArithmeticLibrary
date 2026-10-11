@@ -38,8 +38,8 @@ vectors: $(SF_LIB)
 	$(COMMON)/testbenches/generate_vectors.sh
 
 lint:
-	$(COMMON)/lint.sh "lint fpAdder EXP_W=8 MAN_W=7" -Wall -Wno-fatal -DSYNTHESIS --top-module fpAdder -GEXP_W=8 -GMAN_W=7 $(DESIGN)
-	$(COMMON)/lint.sh "lint fpAdder EXP_W=8 MAN_W=23" -Wall -Wno-fatal -DSYNTHESIS --top-module fpAdder -GEXP_W=8 -GMAN_W=23 $(DESIGN)
+	bash $(COMMON)/lint.sh "lint fpAdder EXP_W=8 MAN_W=7" -Wall -Wno-fatal -DSYNTHESIS --top-module fpAdder -GEXP_W=8 -GMAN_W=7 $(DESIGN)
+	bash $(COMMON)/lint.sh "lint fpAdder EXP_W=8 MAN_W=23" -Wall -Wno-fatal -DSYNTHESIS --top-module fpAdder -GEXP_W=8 -GMAN_W=23 $(DESIGN)
 
 $(SF_LIB):
 	$(MAKE) -C $(SF)/build/Linux-x86_64-GCC

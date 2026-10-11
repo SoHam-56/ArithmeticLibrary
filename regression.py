@@ -200,7 +200,7 @@ def test_points_and_commands():
         assert r.returncode == 0, (name, r.stderr[-200:])
     for name in [p for p in pts if p.endswith("/lint")]:  # every lint prints its counts, one line per configuration
         r = subprocess.run(["make", "-n", "-C", os.path.join(ROOT, name[:-5]), "lint"], capture_output=True, text=True)
-        assert r.stdout.count("Common/lint.sh") == LINT_RUNS[name], (name, r.stdout[-300:])
+        assert len(re.findall(r"(?m)^bash \S+/Common/lint\.sh ", r.stdout)) == LINT_RUNS[name], (name, r.stdout[-300:])  # through bash: a clone may drop the x bit
     for u in ("Adders/FP32", "Multipliers/FP32", "Multipliers/Karatsuba"):  # the threaded benches take their share under make -j
         r = subprocess.run(["make", "-n", "-C", os.path.join(ROOT, u), "verilator", "SIM_THREADS=3"], capture_output=True, text=True)
         assert "--threads 3" in r.stdout, (u, r.stdout[-300:])

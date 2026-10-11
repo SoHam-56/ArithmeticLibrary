@@ -42,7 +42,7 @@ vectors:
 	$(COMMON)/testbenches/generate_int_vectors.sh
 
 lint:
-	$(COMMON)/lint.sh "lint intMultiplier W=8" -Wall -Wno-fatal -DSYNTHESIS --top-module intMultiplier -GW=8 $(RTL)
-	$(COMMON)/lint.sh "lint intMultiplier W=16" -Wall -Wno-fatal -DSYNTHESIS --top-module intMultiplier -GW=16 $(RTL)
+	bash $(COMMON)/lint.sh "lint intMultiplier W=8" -Wall -Wno-fatal -DSYNTHESIS --top-module intMultiplier -GW=8 $(RTL)
+	bash $(COMMON)/lint.sh "lint intMultiplier W=16" -Wall -Wno-fatal -DSYNTHESIS --top-module intMultiplier -GW=16 $(RTL)
 
 .PHONY: build verilator check build16 verilator16 check16 vivado_tb vectors lint
