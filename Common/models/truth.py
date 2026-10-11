@@ -105,14 +105,19 @@ def _float_err(fmt, t, o):
 
 def _int8_err(func, q, out, s_in, z_in, s_out, z_out):
     """Per-element error and LSB distance: 0 within I8_FLOOR, else the dequantized output against t clamped to the output's range."""
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):  # s_out = inf: a zero multiplier, q_true is the zero point
+        return _int8_err_body(func, q, out, s_in, z_in, s_out, z_out)
+
+
+def _int8_err_body(func, q, out, s_in, z_in, s_out, z_out):
     t = ref(func, s_in * (q - z_in))
     lo, hi = s_out * (-128 - z_out), s_out * (127 - z_out)
     qt = np.clip(np.floor(t / s_out + 0.5) + z_out, -128, 127)
     lsb = np.abs(out - qt)
     tc = np.clip(t, lo, hi)
     deq = s_out * (out - z_out)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        rel = np.where(tc != 0, np.abs(deq - tc) / np.abs(tc), np.where(deq == 0, 0.0, np.inf))
+    rel = np.where(tc != 0, np.abs(deq - tc) / np.abs(tc), np.where(deq == 0, 0.0, np.inf))
+    rel = np.where(np.isnan(rel), np.inf, rel)
     floor = lsb <= I8_FLOOR
     return np.where(floor, 0.0, rel), lsb, floor, t, qt
 
@@ -156,7 +161,8 @@ def line(r: Result, bound=None, target=None) -> str:
     bound = BOUND if bound is None else bound
     target = TARGET if target is None else target
     lsb = f"  worst {r.worst_lsb} LSB" if r.fmt == "int8" else ""
-    return (f"TRUTH {r.fmt} {r.func}: {'PASS' if r.ok else 'FAIL'}  n {r.n}  worst {100 * r.worst:.3f}% at x = {r.at:.6g}{lsb}  "
+    w = f"{100 * r.worst:.3f}%" if np.isfinite(r.worst) else "a rule miss (NaN, Inf or overflow)"
+    return (f"TRUTH {r.fmt} {r.func}: {'PASS' if r.ok else 'FAIL'}  n {r.n}  worst {w} at x = {r.at:.6g}{lsb}  "
             f"over {100 * bound:g}%: {r.over}  over {100 * target:g}%: {r.over_target}  (floor {r.n_floor}, overflow {r.n_ovf})")
 
 
@@ -259,6 +265,8 @@ def selftest() -> int:
     i8("int8 linear 100 past the output range (q_true 127), out 120 (5.5% of the clamp)", "linear", 100, 120, True, 0, (1.0, 0, 0.05, 0))
     i8("int8 linear 100 past the output range, out 110 (13% of the clamp)", "linear", 100, 110, False, 1, (1.0, 0, 0.05, 0))
     i8("int8 relu q < z_in, out z_out", "relu", -100, -20, True, 0, (0.05, -20, 0.05, -20))
+    i8("int8 selu zero multiplier (s_out inf), out z_out", "selu", 50, 7, True, 0, (0.05, 0, np.inf, 7))
+    i8("int8 selu zero multiplier, out z_out + 2", "selu", 50, 9, False, 1, (0.05, 0, np.inf, 7))
     i8("int8 relu q < z_in, out q", "relu", -100, -100, False, 1, (0.05, -20, 0.05, -20))
     # the result reports the worst, where it is, and the misses
     xs = encode("bf16", np.array([0.5, 1.0, 2.0, 3.0]))
@@ -269,6 +277,7 @@ def selftest() -> int:
     check("misses listed", [m[0] for m in r.first], [1, 3])
     check("counts", (r.n, r.over, r.over_target), (4, 2, 3))
     check("line", line(r).startswith("TRUTH bf16 sigmoid: FAIL  n 4  worst "), True)
+    check("line names a rule miss", "worst a rule miss" in line(gate("bf16", "sigmoid", [0], [bnan])), True)
     print(f"truth selftest: {checks[0]} checks, {fails[0]} failures")
     print(f"RESULT: {'PASSED' if fails[0] == 0 else 'FAILED'}")
     return fails[0]
