@@ -132,11 +132,18 @@ module tfliteAdd #(
     end
 
 `ifndef SYNTHESIS
-  // Checked only on a valid beat: a bubble's constants are don't-cares.
+  logic s1_bad;  // stage 1 took a beat whose shifts lie outside [-31, 0]; only valid_i loads it, since a bubble's constants are don't-cares
+  logic signed [7:0] s1_sh1, s1_sh2, s1_sho;  // that beat's shifts, for the message
+  always_ff @(posedge clk_i)
+    if (valid_i) begin
+      s1_bad <= !((s1_i >= -8'sd31) && (s1_i <= 8'sd0) && (s2_i >= -8'sd31) && (s2_i <= 8'sd0) && (so_i >= -8'sd31) && (so_i <= 8'sd0));
+      {s1_sh1, s1_sh2, s1_sho} <= {s1_i, s2_i, so_i};
+    end
+  // Checked on the stage-1 registers while v1 marks a real beat, never on the host's inputs at the edge.
   always @(posedge clk_i)
-    if (rstn_i && valid_i)
-      assert ((s1_i >= -8'sd31) && (s1_i <= 8'sd0) && (s2_i >= -8'sd31) && (s2_i <= 8'sd0) && (so_i >= -8'sd31) && (so_i <= 8'sd0))
-      else $error("tfliteAdd: shifts %0d, %0d, %0d outside [-31, 0]", s1_i, s2_i, so_i);
+    if (rstn_i && v1)
+      assert (!s1_bad)
+      else $error("tfliteAdd: shifts %0d, %0d, %0d outside [-31, 0]", s1_sh1, s1_sh2, s1_sho);
 `endif
 
 endmodule
