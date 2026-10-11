@@ -126,12 +126,12 @@ def add_params(s1, s2, s_out) -> dict:
     return dict(m1=m1, s1=sh1, m2=m2, s2=sh2, mo=mo, so=sho)
 
 
-def tflite_add(q1, q2, zp1, zp2, m1, s1, m2, s2, mo, so, zpo, amin, amax, rounding):
-    """TFLite reference int8 ADD (integer_ops/add.h): (q - zp) << 20 per input, each scaled, summed, rescaled, + zpo, max then min."""
+def tflite_add(q1, q2, zp1, zp2, m1, s1, m2, s2, mo, so, zpo, amin, amax, rounding, left_shift=ADD_LEFT_SHIFT):
+    """TFLite reference int8 ADD (integer_ops/add.h): (q - zp) << left_shift per input, each scaled, summed, rescaled, + zpo, max then min."""
     for s in (s1, s2, so):
         if not np.all(np.asarray(s) <= 0):
             raise ValueError("MultiplyByQuantizedMultiplierSmallerThanOneExp needs shift <= 0")
-    a1 = mbqm((sx(q1, 8) - sx(zp1, 8)) << ADD_LEFT_SHIFT, m1, s1, rounding)
-    a2 = mbqm((sx(q2, 8) - sx(zp2, 8)) << ADD_LEFT_SHIFT, m2, s2, rounding)
+    a1 = mbqm((sx(q1, 8) - sx(zp1, 8)) << left_shift, m1, s1, rounding)
+    a2 = mbqm((sx(q2, 8) - sx(zp2, 8)) << left_shift, m2, s2, rounding)
     raw = sx(mbqm(sx(a1 + a2, 32), mo, so, rounding) + sx(zpo, 8), 32)
     return np.minimum(np.maximum(raw, sx(amin, 8)), sx(amax, 8))

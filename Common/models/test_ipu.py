@@ -176,9 +176,9 @@ def c_requant(x, m, s, zp, lo, hi, rounding):
     return min(max(wrap32(c_mbqm(x, m, s, rounding) + zp), lo), hi)
 
 
-def c_add(q1, q2, zp1, zp2, m1, s1, m2, s2, mo, so, zpo, lo, hi, rounding):  # reference integer_ops/add.h AddFunc, line for line
-    a1 = c_mbqm(wrap32((q1 - zp1) * (1 << 20)), m1, s1, rounding)
-    a2 = c_mbqm(wrap32((q2 - zp2) * (1 << 20)), m2, s2, rounding)
+def c_add(q1, q2, zp1, zp2, m1, s1, m2, s2, mo, so, zpo, lo, hi, rounding, ls=20):  # reference integer_ops/add.h AddFunc, line for line; ls is params.left_shift
+    a1 = c_mbqm(wrap32((q1 - zp1) * (1 << ls)), m1, s1, rounding)
+    a2 = c_mbqm(wrap32((q2 - zp2) * (1 << ls)), m2, s2, rounding)
     raw = wrap32(c_mbqm(wrap32(a1 + a2), mo, so, rounding) + zpo)
     return min(hi, max(lo, raw))
 
@@ -298,6 +298,16 @@ def main() -> None:
             want = [c_add(int(a), int(b), z1, z2, p["m1"], p["s1"], p["m2"], p["s2"], p["mo"], p["so"], zo, lo, hi, r)
                     for a, b in zip(g1, g2)]
             check(f"tflite_add exhaustive {r} zp {z1} {z2} {zo}", got, want)
+    # left_shift as a parameter (G0b's negative control uses 19): every pair at P_UN against the transcription, a hand value, the default.
+    w_un = [P_UN[k] for k in ("m1", "s1", "m2", "s2", "mo", "so")]
+    for r in ipu.ROUNDINGS:
+        got = ipu.tflite_add(g1, g2, -7, 33, *w_un, 12, -128, 127, r, left_shift=19)
+        want = [c_add(int(a), int(b), -7, 33, *w_un, 12, -128, 127, r, ls=19) for a, b in zip(g1, g2)]
+        check(f"tflite_add exhaustive {r} left_shift 19", got, want)
+        check(f"tflite_add left_shift 19 {r}", ipu.tflite_add(10, 6, 0, 0, *[P_EQ[k] for k in ("m1", "s1", "m2", "s2", "mo", "so")],
+                                                              0, -128, 127, r, left_shift=19), 4)  # (10 + 6) / 4
+        check(f"tflite_add left_shift 20 is the default {r}", ipu.tflite_add(g1, g2, -7, 33, *w_un, 12, -128, 127, r, left_shift=20),
+              ipu.tflite_add(g1, g2, -7, 33, *w_un, 12, -128, 127, r))
     # Random constants (any int32 multiplier, every shift in [-31, 0]) against the transcription.
     Q = [rng.randint(-128, 127) for _ in range(n)]
     Q2 = [rng.randint(-128, 127) for _ in range(n)]
