@@ -62,7 +62,7 @@ package sienna_fmt_pkg;
     return 4;
   endfunction
 
-  // valid_i to done_o of tfliteAdd, TFLite's int8 ADD; an estimate until the logic-depth probe (sienna-int8-residual).
+  // valid_i to done_o of tfliteAdd, TFLite's int8 ADD: 6 stages, deepest 52 levels against tfliteRequant's 53 (rs1_yd_add_d/_s).
   function automatic int qadd_lat();
     return 6;
   endfunction
