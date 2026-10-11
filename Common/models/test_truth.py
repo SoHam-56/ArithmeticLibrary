@@ -39,8 +39,9 @@ MUTANTS = [
     ("no overflow rule", "big = np.abs(t) > fmax(fmt)", "big = np.abs(t) > np.inf"),
     ("overflow from the rounding threshold", "big = np.abs(t) > fmax(fmt)", "big = np.abs(t) >= 2.0 ** 128 - 2.0 ** (126 - FLOATS[fmt])"),
     ("floor on the output alone", "floor = (np.abs(o) <= F_FLOOR) & (np.abs(t) <= F_FLOOR)", "floor = np.abs(o) <= F_FLOOR"),
-    ("subnormal inputs flushed in the reference", "x, o = decode(fmt, x_in), decode(fmt, out)",
-     "x, o = decode(fmt, x_in), decode(fmt, out)\n        x = np.where(np.abs(x) < F_FLOOR, 0.0, x)"),
+    ("subnormal inputs not read as zero", "t = ref(func, ftz(x))", "t = ref(func, x)"),
+    ("normal inputs at 2^-126 read as zero", "np.where(np.abs(x) < F_FLOOR, np.copysign(0.0, x), x)",
+     "np.where(np.abs(x) <= F_FLOOR, np.copysign(0.0, x), x)"),
     ("int8 true value not clamped to the output range", "tc = np.clip(t, lo, hi)", "tc = t"),
     ("int8 q_true truncated", "np.floor(t / s_out + 0.5)", "np.floor(t / s_out)"),
     ("SELU alpha 1.67", "SELU_ALPHA = 1.6732632423543772848170429916717", "SELU_ALPHA = 1.67"),
@@ -75,6 +76,8 @@ def main():
     check("encode(decode) bf16, every finite pattern", bool(np.array_equal(truth.encode("bf16", truth.decode("bf16", fin)), fin)), True)
     check("encode bf16 ties to even", [int(v) for v in truth.encode("bf16", [1 + 2 ** -8, 1 + 3 * 2 ** -8])], [0x3F80, 0x3F82])
     check("subnormal decoded, not flushed", float(truth.decode("bf16", 0x0001)), 2.0 ** -133)
+    check("ftz: subnormals to signed zero, 2^-126 kept", [str(v) for v in truth.ftz([2.0 ** -133, -2.0 ** -127, 2.0 ** -126])],
+          ["0.0", "-0.0", str(2.0 ** -126)])
     # references against Python's math, scalar by scalar
     xs = np.concatenate([rng.uniform(-50, 50, 3000), rng.uniform(-1e-3, 1e-3, 1000), [0.0, -0.0, 1e-300, -1e-300, 700.0, -700.0]])
     bad = {f: 0 for f in ("sigmoid", "tanh", "selu")}

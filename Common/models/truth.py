@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """True-function gate: float64 numpy references for the activations, and the pass rule every activation run gates on.
 
-The reference is the function of the actual input (subnormals are not flushed); a bit-exact model of the hardware is never the gate.
-Floats pass when |out - t| <= bound |t|, or when |out| and |t| are both <= F_FLOOR; a NaN or Inf output where t is finite fails;
-where t overflows the format, only the format's max or Inf of t's sign passes.
+The reference is the function of the input, with a subnormal input read as zero (the formats flush to zero, Soham 2026-10-11);
+a bit-exact model of the hardware is never the gate.
+Floats pass when |out - t| <= bound |t|, or when |out| and |t| are both <= F_FLOOR; a NaN or Inf output where t is finite fails.
+Overflow rule: where t is above the format's max, the output passes only as max or Inf of t's sign (an exact value above max
+rounds to either).
 int8 passes when |q_out - q_true| <= I8_FLOOR, q_true = round(t / s_out) + z_out clamped, or when the dequantized output is within
 bound of t clamped to the output's range.
 """
@@ -90,6 +92,12 @@ def int8_codes(q):
     return ((np.asarray(q, dtype=np.int64) + 128) & 0xFF) - 128
 
 
+def ftz(x):
+    """Subnormal values read as zero of the same sign, as the formats' units read them."""
+    x = np.asarray(x, dtype=np.float64)
+    return np.where(np.abs(x) < F_FLOOR, np.copysign(0.0, x), x)
+
+
 def _float_err(fmt, t, o):
     """Per-element error: 0 where a floor or the overflow rule passes, inf where a rule fails outright, else |o - t| / |t|."""
     big = np.abs(t) > fmax(fmt)  # the true value overflows the format
@@ -132,7 +140,7 @@ def gate(fmt, func, x_in, out, bound=None, target=None, quant=None) -> Result:
         x, o = decode(fmt, x_in), decode(fmt, out)
         if np.isnan(x).any():
             raise ValueError("NaN inputs are not gated")
-        t = ref(func, x)
+        t = ref(func, ftz(x))  # a subnormal input reads as zero
         e, floor, big = _float_err(fmt, t, o)
         lsb = np.zeros(x.shape, dtype=np.int64)
         show = lambda i: (int(i), float(x[i]), float(o[i]), float(t[i]))
@@ -225,12 +233,19 @@ def selftest() -> int:
     fl("bf16 tanh 2^-130, out next above 2^-126", "bf16", "tanh", b(2.0 ** -130), n1, False, 1)
     fl("fp32 tanh 2^-126 flushed (both <= floor)", "fp32", "tanh", 0x00800000, 0, True, 0)
     fl("fp32 tanh next above 2^-126 flushed", "fp32", "tanh", 0x00800001, 0, False, 1)
-    # subnormal inputs are not flushed in the reference
-    fl("bf16 selu max subnormal, out 0 (true 1.04 x 2^-126)", "bf16", "selu", 0x007F, 0, False, 1)
-    fl("bf16 selu max subnormal, out 2^-126", "bf16", "selu", 0x007F, n0, True, 0, 1)
+    # a subnormal input reads as zero; a normal input just above 2^-126 is judged as given
+    fl("bf16 selu max subnormal, out 0 (input reads as 0)", "bf16", "selu", 0x007F, 0, True, 0, 0)
+    fl("bf16 selu max negative subnormal, out -0", "bf16", "selu", 0x807F, 0x8000, True, 0, 0)
+    fl("bf16 selu max subnormal, out 2^-126 (both <= floor)", "bf16", "selu", 0x007F, n0, True, 0, 0)
+    fl("bf16 selu max subnormal, out 2^-125 (true 0)", "bf16", "selu", 0x007F, 0x0100, False, 1)
     fl("bf16 selu min subnormal, out 0", "bf16", "selu", 0x0001, 0, True, 0)
+    fl("bf16 selu next above 2^-126, flushed to 0", "bf16", "selu", n1, 0, False, 1)
+    fl("bf16 selu 2^-126 (normal, judged as given), out lambda 2^-126", "bf16", "selu", n0, b(SELU_LAMBDA * 2.0 ** -126), True, 0, 0)
+    fl("fp32 selu max subnormal, out 0", "fp32", "selu", 0x007FFFFF, 0, True, 0)
+    fl("fp32 selu next above 2^-126, flushed to 0", "fp32", "selu", 0x00800001, 0, False, 1)
     fl("bf16 sigmoid max subnormal, out 0.5", "bf16", "sigmoid", 0x007F, b(0.5), True, 0, 0)
     fl("bf16 relu negative subnormal, out 0", "bf16", "relu", 0x8040, 0, True, 0)
+    fl("bf16 linear subnormal passed through (both <= floor)", "bf16", "linear", 0x0040, 0x0040, True, 0)
     # overflow: only max or Inf of the true value's sign passes
     r = fl("bf16 selu max, out max", "bf16", "selu", bmax, bmax, True, 0)
     check("bf16 selu max: counted as overflow", r.n_ovf, 1)
