@@ -10,7 +10,7 @@ make regression/Adders/FP/check   # one point; python3 regression.py --action po
 make regression-summary  # the table again, from results/regression/
 ```
 
-Each point runs in a private copy of the tree and passes only on its own verdict (the bench's `RESULT: PASSED`, the model check's 0 mismatches, a clean lint), never on a clean exit alone. The regression fails if any point fails or did not run. Each unit's Makefile still runs its benches alone, e.g. `make -C Adders/FP check`.
+Each point runs in a private copy of the working tree (git's files, ignored outputs left out) and passes only on its own verdict (the bench's `RESULT: PASSED`, the model check's 0 mismatches, each lint's count line with 0 errors), never on a clean exit alone. The regression fails if any point fails or did not run. Each unit's Makefile still runs its benches alone, e.g. `make -C Adders/FP check`.
 
 `Common/regress.py` is the regression engine every repo that holds this library uses for its own `make regression`.
 
