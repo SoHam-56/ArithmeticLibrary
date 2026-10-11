@@ -120,7 +120,10 @@ module TB_tfliteAdd #(
         end
       end
     end else begin
-      if (!$value$plusargs("VEC=%s", vec)) vec = (ROUNDING == "SINGLE") ? "vectors_single.mem" : "vectors_double.mem";
+      if (!$value$plusargs("VEC=%s", vec)) begin  // the committed file must be checked against its row count
+        vec = (ROUNDING == "SINGLE") ? "vectors_single.mem" : "vectors_double.mem";
+        if (!$value$plusargs("N=%d", n_want)) $fatal(1, "TB_tfliteAdd: the default file %s needs +N=<its row count> (gen_add_vectors.py --count --random 10000)", vec);
+      end
       fd = $fopen(vec, "r");
       if (fd == 0) $fatal(1, "TB_tfliteAdd: cannot open %s", vec);
       forever begin
