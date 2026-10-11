@@ -121,6 +121,7 @@ QMS_BAD = [1.0, 0.0, -0.5, 2.0, 1.0 - 2.0 ** -40]  # the last rounds to 2^31: ha
 P_EQ = dict(m1=1 << 30, s1=0, m2=1 << 30, s2=0, mo=1 << 30, so=-19)  # add_params(0.5, 0.5, 1.0): 0.5, 0.5, 2^-20
 P_UN = dict(m1=1 << 30, s1=-1, m2=1 << 30, s2=0, mo=1431655765, so=-19)  # add_params(0.25, 0.5, 0.75): 0.25, 0.5, 1/(0.75 * 2^20)
 P_WIDE = dict(m1=1 << 30, s1=-10, m2=1 << 30, s2=0, mo=1 << 30, so=-15)  # add_params(2^-10, 1, 2^-3): scale ratio 2^10
+P_F32 = dict(m1=1717986944, s1=-2, m2=1 << 30, s2=0, mo=1342177260, so=-17)  # add_params(0.1, 0.25, 0.1), f = float32(0.1) = 13421773 * 2^-27: f / 0.5 -> 13421773 * 2^7, shift -2; 0.5 / (2^20 f) -> round(2^54 / 13421773) = 1342177260, shift -17 (double 0.1 gives 1717986918 and 1342177280)
 ADD = [  # q1, q2, zp1, zp2, words, zpo, amin, amax, DOUBLE, SINGLE; P_EQ gives y = (d1 + d2) / 2
     (10, 6, 0, 0, P_EQ, 0, -128, 127, 8, 8),
     (1, 0, 0, 0, P_EQ, 0, -128, 127, 1, 1),  # +0.5: away (DOUBLE) and up (SINGLE) agree
@@ -135,6 +136,15 @@ ADD = [  # q1, q2, zp1, zp2, words, zpo, amin, amax, DOUBLE, SINGLE; P_EQ gives 
     (12, 3, 0, 0, P_UN, 0, -128, 127, 6, 6),  # (0.25 * 12 + 0.5 * 3) / 0.75 = 6
     (-12, -3, 0, 0, P_UN, 0, -128, 127, -6, -6),
     (0x80, 0x7F, 0, 0, P_EQ, 0, 0x80, 0x7F, -1, 0),  # 8-bit patterns: -128 + 127 = -1, so -0.5; clamp patterns read signed
+    (-128, -128, 0, 0, P_EQ, 0, -20, 127, -20, -20),  # -128 below act_min: saturates to -20
+    (-128, -128, 0, 0, P_EQ, -100, -128, 127, -128, -128),  # -128 - 100 = -228, below the int8 range: -128
+    (-10, -6, 0, 0, P_EQ, 127, -128, 127, 119, 119),  # zp_o 127: -8 + 127
+    (10, 6, 0, 0, P_EQ, 127, -128, 127, 127, 127),  # zp_o 127: 8 + 127 = 135 saturates
+    (10, 6, 0, 0, P_EQ, -128, -128, 127, -120, -120),  # zp_o -128: 8 - 128
+    (-10, -6, 0, 0, P_EQ, -128, -128, 127, -128, -128),  # zp_o -128: -8 - 128 = -136 saturates
+    (127, 127, -128, -128, P_EQ, -128, -128, 127, 127, 127),  # same-sign maximal d = 255 on both: (255 + 255) / 2 - 128
+    (127, 127, -128, -128, P_EQ, 0, -128, 127, 127, 127),  # d = 255 on both, zp_o 0: 255 saturates
+    (-128, -128, 127, 127, P_EQ, 127, -128, 127, -128, -128),  # d = -255 on both: -255 + 127
 ]
 
 
@@ -271,6 +281,7 @@ def main() -> None:
     check("add_params(0.5, 0.5, 1.0)", sorted(ipu.add_params(0.5, 0.5, 1.0).items()), sorted(P_EQ.items()))
     check("add_params(0.25, 0.5, 0.75)", sorted(ipu.add_params(0.25, 0.5, 0.75).items()), sorted(P_UN.items()))
     check("add_params(2^-10, 1, 2^-3)", sorted(ipu.add_params(2.0 ** -10, 1.0, 2.0 ** -3).items()), sorted(P_WIDE.items()))
+    check("add_params(float32(0.1), 0.25, float32(0.1))", sorted(ipu.add_params(0.1, 0.25, 0.1).items()), sorted(P_F32.items()))
     check("add_params is symmetric", sorted(ipu.add_params(0.5, 0.25, 0.75).items()),
           sorted(dict(P_UN, m1=P_UN["m2"], s1=P_UN["s2"], m2=P_UN["m1"], s2=P_UN["s1"]).items()))
     check("ADD_LEFT_SHIFT", ipu.ADD_LEFT_SHIFT, 20)
@@ -292,11 +303,22 @@ def main() -> None:
     Q2 = [rng.randint(-128, 127) for _ in range(n)]
     SH = [[rng.randint(-31, 0) for _ in range(n)] for _ in range(3)]
     M3 = [[r32() for _ in range(n)] for _ in range(3)]
+    Z2, ZO = ([rng.randint(-128, 127) for _ in range(n)] for _ in range(2))  # zp2 and zp_o drawn on their own
+    C1, C2 = ([rng.randint(-128, 127) for _ in range(n)] for _ in range(2))
+    CLO, CHI = [min(a, b) for a, b in zip(C1, C2)], [max(a, b) for a, b in zip(C1, C2)]  # a clamp with lo <= hi
     for r in ipu.ROUNDINGS:
-        got = ipu.tflite_add(np.array(Q), np.array(Q2), nz, np.array(LO), np.array(M3[0]), np.array(SH[0]), np.array(M3[1]),
-                             np.array(SH[1]), np.array(M3[2]), np.array(SH[2]), np.array(HI), np.array(LO), np.array(HI), r)
-        want = [c_add(*t, r) for t in zip(Q, Q2, Z, LO, M3[0], SH[0], M3[1], SH[1], M3[2], SH[2], HI, LO, HI)]
+        got = ipu.tflite_add(np.array(Q), np.array(Q2), nz, np.array(Z2), np.array(M3[0]), np.array(SH[0]), np.array(M3[1]),
+                             np.array(SH[1]), np.array(M3[2]), np.array(SH[2]), np.array(ZO), np.array(CLO), np.array(CHI), r)
+        want = [c_add(*t, r) for t in zip(Q, Q2, Z, Z2, M3[0], SH[0], M3[1], SH[1], M3[2], SH[2], ZO, CLO, CHI)]
         check(f"tflite_add random {r}", got, want)
+    for k in range(3):  # a positive shift is outside MultiplyByQuantizedMultiplierSmallerThanOneExp
+        sh = [0, 0, 0]
+        sh[k] = 1
+        try:
+            ipu.tflite_add(0, 0, 0, 0, H, sh[0], H, sh[1], H, sh[2], 0, -128, 127, "DOUBLE")
+            check(f"tflite_add shift {sh} raises", "returned", "ValueError")
+        except ValueError:
+            check(f"tflite_add shift {sh} raises", "ValueError", "ValueError")
     # tfliteAdd's stage-1 forms: DOUBLE SRDHM(d << 20, m) = (d m + 2^10) >> 11; SINGLE MBQM(d << 20, m, s) = (d m + 2^(10 - s)) >> (11 - s).
     ms = [0, 1, H - 1, H, H + 1, MAX - 1, MAX, MIN, MIN + 1, -1, -H] + [r32() for _ in range(40)]
     d = np.arange(-255, 256)

@@ -129,7 +129,8 @@ def add_params(s1, s2, s_out) -> dict:
 def tflite_add(q1, q2, zp1, zp2, m1, s1, m2, s2, mo, so, zpo, amin, amax, rounding):
     """TFLite reference int8 ADD (integer_ops/add.h): (q - zp) << 20 per input, each scaled, summed, rescaled, + zpo, max then min."""
     for s in (s1, s2, so):
-        assert np.all(np.asarray(s) <= 0), "MultiplyByQuantizedMultiplierSmallerThanOneExp needs shift <= 0"
+        if not np.all(np.asarray(s) <= 0):
+            raise ValueError("MultiplyByQuantizedMultiplierSmallerThanOneExp needs shift <= 0")
     a1 = mbqm((sx(q1, 8) - sx(zp1, 8)) << ADD_LEFT_SHIFT, m1, s1, rounding)
     a2 = mbqm((sx(q2, 8) - sx(zp2, 8)) << ADD_LEFT_SHIFT, m2, s2, rounding)
     raw = sx(mbqm(sx(a1 + a2, 32), mo, so, rounding) + sx(zpo, 8), 32)
