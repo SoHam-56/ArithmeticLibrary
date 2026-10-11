@@ -46,6 +46,24 @@ MUTANTS = [
     ("int8 q_true truncated", "np.floor(t / s_out + 0.5)", "np.floor(t / s_out)"),
     ("SELU alpha 1.67", "SELU_ALPHA = 1.6732632423543772848170429916717", "SELU_ALPHA = 1.67"),
     ("tanh as x", "return np.tanh(np.asarray(x, dtype=np.float64))", "return np.asarray(x, dtype=np.float64)"),
+    ("matmul bound 2%", "MM_BOUND = 0.01", "MM_BOUND = 0.02"),
+    ("matmul overflow sign ignored", "| np.isinf(o)) & (np.sign(o) == np.sign(t))", "| np.isinf(o))"),
+    ("matmul no overflow rule", 'big = np.zeros(t.shape, dtype=bool) if fmt == "int8" else np.abs(t) > fmax("fp32")', "big = np.zeros(t.shape, dtype=bool)"),
+    ("matmul floor dropped", "lim = np.maximum(bound * s, F_FLOOR)", "lim = bound * s"),
+    ("matmul bias left out", "t, s = t + b, s + np.abs(b)", "t, s = t, s + np.abs(b)"),
+    ("matmul sum|ab| as |sum ab|", "s + np.abs(A) @ np.abs(B)", "s + np.abs(A @ B)"),
+    ("matmul last pass only", "t, s = t + A @ B,", "t, s = A @ B,"),
+    ("matmul operands' subnormals kept", "        return ftz(decode(fmt, w))", "        return decode(fmt, w)"),
+    ("narrow truncates", 'return encode(fmt, ftz(decode("fp32", pre)))',
+     'return (np.asarray(pre, dtype=np.int64) >> 16) & 0xFFFF if fmt == "bf16" else encode(fmt, ftz(decode("fp32", pre)))'),
+    ("narrow NaN never matches", "ok_el = (vw == vp) | (np.isnan(vw) & np.isnan(vp))", "ok_el = vw == vp"),
+    ("requant truncates", "np.right_shift(prod + np.left_shift(np.int64(1), d - 1), d)", "np.right_shift(prod, d)"),
+    ("requant zero point left out", "return np.clip(q + zp, amin, amax), real", "return np.clip(q, amin, amax), real"),
+    ("requant within 2 LSB", "miss = np.flatnonzero(lsb > I8_FLOOR)", "miss = np.flatnonzero(lsb > I8_FLOOR + 1)"),
+    ("maxpool first element", "xp[i * ph:i * ph + ph, j * pw:j * pw + pw].max()", "xp[i * ph:i * ph + ph, j * pw:j * pw + pw].ravel()[0]"),
+    ("maxpool pad 0", "fill = -128.0 if fmt == \"int8\" else -np.inf", "fill = 0.0"),
+    ("dropout unscaled", "kept = values(fmt, encode(fmt, xv / (1.0 - p)))", "kept = xv"),
+    ("dropout mask ignored", "want = np.where(keep, kept, dropped) if training else xv", "want = kept if training else xv"),
 ]
 
 
@@ -131,6 +149,42 @@ def main():
             check("bad call raises", "returned", "ValueError")
         except ValueError:
             check("bad call raises", "ValueError", "ValueError")
+    # the stage references against independent ones: TFLite's requantize, fpu's narrowing, loops, brute-force windows
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import fpu  # noqa: E402
+    import ipu  # noqa: E402
+    acc = rng.integers(-2**31, 2**31, 20000)
+    mult = rng.integers(1 << 30, 1 << 31, 20000)
+    shift = rng.integers(-31, 1, 20000)
+    zp, lo, hi = rng.integers(-128, 128, 20000), -128, 127
+    qt, real = truth.requant_ref(acc, mult, shift, zp, lo, hi)
+    from fractions import Fraction
+    exact = [min(hi, max(lo, math.floor(Fraction(int(a) * int(m), 2 ** (31 - int(s))) + Fraction(1, 2)) + int(z)))
+             for a, m, s, z in zip(acc[:3000], mult[:3000], shift[:3000], zp[:3000])]
+    check("requant_ref against Fractions, 3000 draws", qt[:3000].tolist(), exact)
+    tfl = np.asarray(ipu.requant(acc, mult, shift, zp, lo, hi, "DOUBLE"), dtype=np.int64)
+    check("TFLite's requantize within 1 LSB of requant_ref, 20000 draws", int(np.abs(tfl - qt).max()) <= 1, True)
+    check("gate_requant passes TFLite's words", truth.gate_requant(acc, mult, shift, zp, lo, hi, tfl).ok, True)
+    w = np.concatenate([rng.integers(0, 1 << 32, 20000), [0x7F7F8000, 0xFF7F8000, 0x7F7F7FFF, 0x3F808000, 0x3F818000]])
+    w = w[((w >> 23) & 0xFF) != 0]  # fpNarrow flushes subnormal inputs as narrow_ref does; compared on normals, NaN and Inf
+    want = np.asarray(fpu.narrow(fpu.FORMATS["bf16"], w), dtype=np.int64)
+    got = truth.narrow_ref("bf16", w)
+    vw, vg = truth.decode("bf16", want), truth.decode("bf16", got)
+    check("narrow_ref against fpu.narrow, 20000 words", bool(np.all((vw == vg) | (np.isnan(vw) & np.isnan(vg)))), True)
+    As = [rng.uniform(-4, 4, (5, 3)) for _ in range(3)]
+    Bs = [rng.uniform(-4, 4, (3, 4)) for _ in range(3)]
+    bias = rng.uniform(-1, 1, 4)
+    t, s = truth.matmul_ref(list(zip(As, Bs)), bias)
+    lt = [[math.fsum([As[p][i, k] * Bs[p][k, j] for p in range(3) for k in range(3)] + [bias[j]]) for j in range(4)] for i in range(5)]
+    ls = [[math.fsum([abs(As[p][i, k] * Bs[p][k, j]) for p in range(3) for k in range(3)] + [abs(bias[j])]) for j in range(4)] for i in range(5)]
+    check("matmul_ref against fsum loops", bool(np.allclose(t, lt, rtol=1e-14, atol=1e-14) and np.allclose(s, ls, rtol=1e-14)), True)
+    x = rng.uniform(-9, 9, (6, 7))
+    for ph, pw, pad in ((2, 2, 1), (3, 2, 0), (1, 1, 0), (2, 3, 1)):
+        ref = truth.maxpool_ref(x, ph, pw, pad, -np.inf)
+        xp = np.pad(x, pad, constant_values=-np.inf)
+        bf = [[max(xp[i * ph + a, j * pw + b] for a in range(ph) for b in range(pw)) for j in range(ref.shape[1])] for i in range(ref.shape[0])]
+        check(f"maxpool_ref {ph}x{pw} pad {pad} against brute force", ref.tolist(), bf)
+
     # the selftest passes, and fails on each mutant
     with contextlib.redirect_stdout(io.StringIO()):
         check("selftest failures", truth.selftest(), 0)

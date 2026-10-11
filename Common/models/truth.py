@@ -179,6 +179,202 @@ def line(r: Result, bound=None, target=None) -> str:
             f"over {100 * bound:g}%: {r.over}  over {100 * target:g}%: {r.over_target}  (floor {r.n_floor}, overflow {r.n_ovf})")
 
 
+# ── per-stage gates (mesh and pipeline): each stage against the true function of its own actual inputs ──
+
+MM_BOUND = 0.01  # matmul and accumulate: |err| <= max(1% of sum|a b|, 2^-126) per element (Soham, 2026-10-11)
+STAGES = ("matmul", "narrow", "requant", "activation", "maxpool", "dropout")
+
+
+def values(fmt, w):
+    """Words as float64 values: fp32 or bf16 bit patterns (a subnormal reads as zero), int8 codes, or int32 words ('int32')."""
+    if fmt in FLOATS:
+        return ftz(decode(fmt, w))
+    if fmt == "int8":
+        return int8_codes(w).astype(np.float64)
+    if fmt == "int32":
+        return ((((np.asarray(w, dtype=np.int64) & 0xFFFFFFFF) + 2**31) & 0xFFFFFFFF) - 2**31).astype(np.float64)
+    raise ValueError(f"{fmt}: not one of {', '.join(FORMATS)}, int32")
+
+
+def acc_fmt(fmt):
+    """The accumulator's words: fp32 in every float format, int32 in int8."""
+    return "int32" if fmt == "int8" else "fp32"
+
+
+def matmul_ref(passes, bias=None):
+    """The float64 sum over passes of A @ B plus the bias row, and sum|a b| (plus |bias|) per element; values in."""
+    t = s = 0.0
+    for A, B in passes:
+        A, B = np.asarray(A, dtype=np.float64), np.asarray(B, dtype=np.float64)
+        t, s = t + A @ B, s + np.abs(A) @ np.abs(B)
+    if bias is not None:
+        b = np.asarray(bias, dtype=np.float64)[None, :]
+        t, s = t + b, s + np.abs(b)
+    return np.asarray(t, dtype=np.float64), np.asarray(s, dtype=np.float64)
+
+
+def _exact_result(fmt, func, ok_el, err, at, first):
+    """A Result for an exact stage: worst is the largest |out - want| (0 when every element matches)."""
+    miss = np.flatnonzero(~ok_el)
+    e = np.where(ok_el, 0.0, err)
+    i = int(np.argmax(e)) if e.size else 0
+    return Result(miss.size == 0, fmt, func, int(ok_el.size), float(e[i]) if e.size else 0.0, float(at[i]) if e.size else 0.0, i,
+                  int(miss.size), int(miss.size), 0, 0, 0, [first(k) for k in miss[:FIRST]])
+
+
+def gate_matmul(fmt, passes, out, bias=None, bound=None) -> Result:
+    """Mesh sums against the float64 sum of the operands it received: |out - t| <= max(bound sum|a b|, 2^-126) per element.
+
+    A true sum above fp32's max passes only as max or Inf of its sign (gate()'s overflow rule); int8's int32 sums have no such rule.
+
+    fmt is the operands' format (passes of (A, B) words); out and bias are accumulator words (fp32, or int32 in int8).
+    worst is |out - t| / sum|a b| (unbounded where sum|a b| is 0 and the floor fails), worst_lsb the largest |out - t| in int8."""
+    bound = MM_BOUND if bound is None else bound
+    vals = [(values(fmt, A), values(fmt, B)) for A, B in passes]
+    if not vals:
+        raise ValueError("no passes")
+    b = None if bias is None else values(acc_fmt(fmt), bias)
+    t, s = matmul_ref(vals, b)
+    o = values(acc_fmt(fmt), out).reshape(t.shape)
+    lim = np.maximum(bound * s, F_FLOOR)
+    big = np.zeros(t.shape, dtype=bool) if fmt == "int8" else np.abs(t) > fmax("fp32")  # the true sum overflows the fp32 accumulator
+    ovf_ok = big & ((np.abs(o) == fmax("fp32")) | np.isinf(o)) & (np.sign(o) == np.sign(t))  # as gate(): only max or Inf of t's sign
+    with np.errstate(invalid="ignore", divide="ignore"):
+        err = np.abs(o - t)
+        ok_el = np.where(big, ovf_ok, err <= lim)  # NaN or Inf outputs compare False
+        e = np.where(s > 0, err / s, np.where(err <= F_FLOOR, 0.0, np.inf))
+    e = np.where(big, np.where(ovf_ok, 0.0, np.inf), np.where(np.isfinite(o), e, np.inf)).ravel()
+    miss = np.flatnonzero(~ok_el.ravel())
+    i = int(np.argmax(e))
+    tl, ol, sl = t.ravel(), o.ravel(), s.ravel()
+    lsb = int(np.max(np.where(np.isfinite(err), err, 0.0))) if fmt == "int8" else 0
+    return Result(miss.size == 0, fmt, "matmul", int(t.size), float(e[i]), float(tl[i]), i, int(miss.size), int(miss.size), lsb,
+                  int((bound * s < F_FLOOR).sum()), int(big.sum()), [(int(k), float(ol[k]), float(tl[k]), float(sl[k])) for k in miss[:FIRST]])
+
+
+def narrow_ref(fmt, pre):
+    """fp32 words rounded to nearest even in fmt: a subnormal reads as zero, NaN stays NaN, past max rounds to Inf."""
+    return encode(fmt, ftz(decode("fp32", pre)))
+
+
+def _order(fmt, w):
+    """Words as integers in value order (sign-magnitude to two's complement), for ULP distances."""
+    top = 31 if fmt == "fp32" else 15
+    w = np.asarray(w, dtype=np.int64) & ((1 << (top + 1)) - 1)
+    mag = w & ((1 << top) - 1)
+    return np.where((w >> top) & 1, -mag, mag)
+
+
+def gate_narrow(fmt, pre, post) -> Result:
+    """Narrowing is exact: each output equals the round-to-nearest-even fmt word of its fp32 input (as values; NaN matches NaN).
+
+    worst and worst_lsb are the largest distance in ULPs of fmt."""
+    pre, post = np.asarray(pre, dtype=np.int64).ravel(), np.asarray(post, dtype=np.int64).ravel()
+    want = narrow_ref(fmt, pre)
+    vw, vp = decode(fmt, want), decode(fmt, post)
+    ok_el = (vw == vp) | (np.isnan(vw) & np.isnan(vp))
+    ulp = np.abs(_order(fmt, post) - _order(fmt, want)).astype(np.float64)
+    r = _exact_result(fmt, "narrow", ok_el, ulp, decode("fp32", pre), lambda k: (int(k), int(pre[k]), int(post[k]), int(want[k])))
+    return r._replace(worst_lsb=int(r.worst))
+
+
+def requant_ref(acc, mult, shift, zp, amin, amax):
+    """(q_true, real): real = acc mult 2^(shift - 31) + zp clamped to [amin, amax], q_true its round to nearest (half up), exactly."""
+    acc = (((np.asarray(acc, dtype=np.int64) & 0xFFFFFFFF) + 2**31) & 0xFFFFFFFF) - 2**31
+    acc, mult, shift = np.broadcast_arrays(acc, np.asarray(mult, dtype=np.int64), np.asarray(shift, dtype=np.int64))
+    d = 31 - shift
+    if np.any((d < 1) | (d > 62)) or np.any((mult < 0) | (mult >= 2**31)):
+        raise ValueError("requant_ref: shift must be in [-31, 30] and mult in [0, 2^31)")
+    prod = acc * mult  # below 2^62 in magnitude, so int64 holds it exactly
+    q = np.right_shift(prod + np.left_shift(np.int64(1), d - 1), d)  # floor((prod + 2^(d-1)) / 2^d): round half up
+    zp, amin, amax = (np.asarray(v, dtype=np.int64) for v in (zp, amin, amax))
+    real = np.clip(prod / np.ldexp(1.0, d) + zp, amin, amax)
+    return np.clip(q + zp, amin, amax), real
+
+
+def gate_requant(acc, mult, shift, zp, amin, amax, q) -> Result:
+    """Requantize outputs (int8 codes) within I8_FLOOR LSB of round(real); worst is the largest |q - real| in LSBs."""
+    qt, real = requant_ref(acc, mult, shift, zp, amin, amax)
+    q = int8_codes(q).reshape(qt.shape)
+    lsb, dev = np.abs(q - qt).ravel(), np.abs(q - real).ravel()
+    miss = np.flatnonzero(lsb > I8_FLOOR)
+    i = int(np.argmax(dev))
+    a = np.broadcast_to(np.asarray(acc, dtype=np.int64), qt.shape).ravel()
+    return Result(miss.size == 0, "int8", "requant", int(qt.size), float(dev[i]), float(real.ravel()[i]), i, int(miss.size),
+                  int(miss.size), int(lsb.max()), 0, 0, [(int(k), int(a[k]), int(q.ravel()[k]), int(qt.ravel()[k])) for k in miss[:FIRST]])
+
+
+def maxpool_ref(x, ph, pw, pad, fill):
+    """Max of every ph x pw window, stride the window, the input padded by pad with fill on each side."""
+    x = np.asarray(x, dtype=np.float64)
+    H, W = x.shape
+    xp = np.full((H + 2 * pad, W + 2 * pad), fill, dtype=np.float64)
+    xp[pad:pad + H, pad:pad + W] = x
+    oh, ow = (H + 2 * pad - ph) // ph + 1, (W + 2 * pad - pw) // pw + 1
+    return np.array([[xp[i * ph:i * ph + ph, j * pw:j * pw + pw].max() for j in range(ow)] for i in range(oh)], dtype=np.float64)
+
+
+def gate_maxpool(fmt, x, out, ph, pw, pad) -> Result:
+    """Max pooling is exact: each output equals the max of its window of the stage's actual inputs (as values; x is 2-D)."""
+    fill = -128.0 if fmt == "int8" else -np.inf
+    want = maxpool_ref(values(fmt, x), ph, pw, pad, fill).ravel()
+    got = values(fmt, out).ravel()
+    if got.size != want.size:
+        raise ValueError(f"maxpool: {got.size} outputs, the windows are {want.size}")
+    ok_el = (got == want) | (np.isnan(got) & np.isnan(want))
+    with np.errstate(invalid="ignore"):
+        err = np.where(ok_el, 0.0, np.abs(got - want))
+    return _exact_result(fmt, "maxpool", ok_el, np.where(np.isnan(err), np.inf, err), want,
+                         lambda k: (int(k), float(got[k]), float(want[k])))
+
+
+def gate_dropout(fmt, x, keep, out, p, training, zp=0) -> Result:
+    """Dropout is exact against its mask: training keeps x / (1 - p) (rounded to fmt; int8 keeps x) or drops to 0 (int8: zp); inference passes x."""
+    xv, got = values(fmt, x).ravel(), values(fmt, out).ravel()
+    keep = np.asarray(keep, dtype=bool).ravel()
+    if fmt == "int8":
+        kept, dropped = xv, np.broadcast_to(np.asarray(zp, dtype=np.float64), xv.shape)
+    else:
+        with np.errstate(over="ignore"):
+            kept = values(fmt, encode(fmt, xv / (1.0 - p)))
+        dropped = np.zeros_like(xv)
+    want = np.where(keep, kept, dropped) if training else xv
+    ok_el = (got == want) | (np.isnan(got) & np.isnan(want))
+    with np.errstate(invalid="ignore"):
+        err = np.where(ok_el, 0.0, np.abs(got - want))
+    return _exact_result(fmt, "dropout", ok_el, np.where(np.isnan(err), np.inf, err), want,
+                         lambda k: (int(k), float(xv[k]), float(got[k]), float(want[k])))
+
+
+def stage_line(r: Result) -> str:
+    """One report line for a stage gate's result, named by its stage and format."""
+    if r.func == "matmul":
+        w = (f"worst {100 * r.worst:.3g}% of sum|ab|" if np.isfinite(r.worst) else f"worst {worst_text(r.worst)}") + \
+            (f" ({r.worst_lsb} in int32)" if r.fmt == "int8" else "")
+        rule = f"over max({100 * MM_BOUND:g}% of sum|ab|, 2^-126): {r.over}  (floor {r.n_floor}, overflow {r.n_ovf})"
+    elif r.func == "requant":
+        w = f"worst {r.worst:.3f} LSB from real, {r.worst_lsb} from round(real)"
+        rule = f"over {I8_FLOOR} LSB: {r.over}"
+    elif r.func == "narrow":
+        w = f"worst {r.worst_lsb} ULP"
+        rule = f"not round-to-nearest-even: {r.over}"
+    else:
+        w = f"worst |out - want| {r.worst:.6g}"
+        rule = f"not exact: {r.over}"
+    return f"TRUTH {r.fmt} {r.func}: {'PASS' if r.ok else 'FAIL'}  n {r.n}  {w}  {rule}"
+
+
+def merge(rs) -> Result:
+    """One Result over several of one stage and format: counts summed, the worst kept, the first misses in order."""
+    rs = [r for r in rs if r is not None]
+    if not rs:
+        return None
+    w = max(rs, key=lambda r: (r.worst, r.worst_lsb))
+    return w._replace(ok=all(r.ok for r in rs), n=sum(r.n for r in rs), over=sum(r.over for r in rs),
+                      over_target=sum(r.over_target for r in rs), worst_lsb=max(r.worst_lsb for r in rs),
+                      n_floor=sum(r.n_floor for r in rs), n_ovf=sum(r.n_ovf for r in rs), first=[m for r in rs for m in r.first][:FIRST])
+
+
 # ── selftest: every rule passing and failing on hand-made cases ──
 
 
@@ -299,6 +495,120 @@ def selftest() -> int:
     check("line", line(r).startswith("TRUTH bf16 sigmoid: FAIL  n 4  worst "), True)
     check("line names an unbounded miss", "worst unbounded" in line(gate("bf16", "sigmoid", [0], [bnan])), True)
     check("worst_text", (worst_text(0.0123), worst_text(np.inf).startswith("unbounded")), ("1.230%", True))
+    # matmul: within max(1% of sum|ab|, 2^-126) of the float64 sum, bias included, every pass summed
+    A, B = np.array([[1.0, 2.0], [3.0, -4.0]]), np.array([[0.5, -1.0], [0.25, 2.0]])
+    Aw, Bw = encode("fp32", A), encode("fp32", B)
+    tm = A @ B  # [[1, 3], [2.5, -11]]; sum|ab| [[1, 5], [2.5, 11]]
+    mm = lambda o, ok, over=None, **kw: (lambda r: (check(f"matmul {o}: ok", r.ok, ok), over is None or check(f"matmul {o}: over", r.over, over), r)[2])(
+        gate_matmul("fp32", kw.pop("passes", [(Aw, Bw)]), encode("fp32", np.asarray(o, dtype=np.float64)), **kw))
+    mm(tm, True, 0)
+    mm(tm + np.array([[0.0, 0.049], [0.0, 0.0]]), True, 0)  # 0.98% of 5
+    mm(tm + np.array([[0.0, 0.051], [0.0, 0.0]]), False, 1)  # 1.02% of 5
+    mm(tm - np.array([[0.0, 0.0], [0.0, 0.12]]), False, 1)  # 1.09% of 11
+    r = mm(tm + np.array([[0.0, 0.0], [0.0, 0.1]]), True, 0)
+    check("matmul worst is |err| / sum|ab|", abs(r.worst - 0.1 / 11) < 1e-6, True)
+    mm(np.where(np.eye(2, dtype=bool), tm, np.inf), False, 2)
+    mm(np.where(np.eye(2, dtype=bool), tm, np.nan), False, 2)
+    bias = encode("fp32", np.array([10.0, -20.0]))
+    mm(tm + np.array([10.0, -20.0]), True, 0, bias=bias)
+    mm(tm, False, 4, bias=bias)  # the bias left out
+    mm(tm + np.array([10.0, -19.9]), True, 0, bias=bias)  # 0.1 within 1% of sum|ab| + |bias| (25 and 31)
+    mm(2 * tm, True, 0, passes=[(Aw, Bw), (Aw, Bw)])
+    mm(tm, False, 4, passes=[(Aw, Bw), (Aw, Bw)])  # a pass left out
+    Z = encode("fp32", np.zeros((2, 2)))
+    mm(np.full((2, 2), 2.0 ** -126), True, 0, passes=[(Z, Z)])  # sum|ab| 0: the 2^-126 floor
+    mm(np.full((2, 2), 2.0 ** -125), False, 4, passes=[(Z, Z)])
+    check("matmul floor counted", gate_matmul("fp32", [(Z, Z)], Z).n_floor, 4)
+    M = encode("fp32", np.full((2, 2), 2.0 ** 127))
+    one = encode("fp32", np.ones((2, 2)))  # true sums 2^128, above fp32's max
+    for what, o, ok in (("Inf", np.inf, True), ("max", fmax("fp32"), True), ("-Inf", -np.inf, False), ("2^127", 2.0 ** 127, False)):
+        r = gate_matmul("fp32", [(M, one)], encode("fp32", np.full((2, 2), o)))
+        check(f"matmul true sum past fp32's max, out {what}", (r.ok, r.n_ovf), (ok, 4))
+    r = gate_matmul("bf16", [(encode("bf16", A), encode("bf16", B))], encode("fp32", tm))
+    check("matmul bf16 operands, fp32 sums", r.ok, True)
+    sub = np.array([[0x00400000, 0], [0x3F800000, 0x3F800000]])  # a subnormal operand (2^-127) reads as zero, not 2^-127 2^126
+    r = gate_matmul("fp32", [(sub, encode("fp32", np.full((2, 2), 2.0 ** 126)))], encode("fp32", np.array([[0.0] * 2, [2.0 ** 127] * 2])))
+    check("matmul: a subnormal operand reads as zero", r.ok, True)
+    ia, ib = np.array([[127, -128], [5, 6]]), np.array([[-128, 1], [127, 2]])
+    ti = ia @ ib
+    i32 = lambda v: np.asarray(v, dtype=np.int64) & 0xFFFFFFFF
+    check("matmul int8 exact", gate_matmul("int8", [(ia & 0xFF, ib & 0xFF)], i32(ti)).ok, True)
+    r = gate_matmul("int8", [(ia, ib)], i32(ti + np.array([[300, 0], [0, 0]])))
+    check("matmul int8 300 off (1% of 32512 is 325)", (r.ok, r.worst_lsb), (True, 300))
+    r = gate_matmul("int8", [(ia, ib)], i32(ti + np.array([[400, 0], [0, 0]])))
+    check("matmul int8 400 off", (r.ok, r.over, r.worst_lsb), (False, 1, 400))
+    big = np.array([2**31 - 40000, 0])
+    r = gate_matmul("int8", [(ia, ib)], i32(ti + big), bias=i32(big))
+    check("matmul int8 bias near int32 max, sums in range", r.ok, True)
+    wrap = np.array([2**31 - 1, 0])
+    r = gate_matmul("int8", [(np.array([[1, 0], [0, 0]]), np.array([[1, 0], [0, 0]]))], i32(np.array([[-2**31, 0], [2**31 - 1, 0]])), bias=i32(wrap))
+    check("matmul int8: a sum past int32 that wraps fails", (r.ok, r.over), (False, 1))
+    # narrowing: round to nearest even, exactly
+    nr = lambda what, pre, post, ok: check(f"narrow {what}", gate_narrow("bf16", [pre], [post]).ok, ok)
+    nr("1.0", 0x3F800000, 0x3F80, True)
+    nr("tie to even down", 0x3F808000, 0x3F80, True)
+    nr("tie to even up", 0x3F818000, 0x3F82, True)
+    nr("tie to even, truncated", 0x3F818000, 0x3F81, False)
+    nr("above half, rounded up", 0x3F80C000, 0x3F81, True)
+    nr("above half, truncated", 0x3F80C000, 0x3F80, False)
+    nr("below half", 0x3F807FFF, 0x3F80, True)
+    nr("past max rounds to Inf", 0x7F7F8000, 0x7F80, True)
+    nr("past max, max", 0x7F7F8000, 0x7F7F, False)
+    nr("-0", 0x80000000, 0x8000, True)
+    nr("subnormal reads as 0", 0x00400000, 0x0000, True)
+    nr("NaN", 0x7FC00001, 0x7FC0, True)
+    nr("NaN, out a number", 0x7FC00001, 0x3F80, False)
+    check("narrow ULP distance", gate_narrow("bf16", [0x3F80C000], [0x3F7F]).worst_lsb, 2)
+    # requantize: within 1 LSB of round(acc mult 2^(shift-31) + zp), clamped
+    m1 = 1 << 30  # 0.5 at shift 0
+    rq = lambda what, acc, q, ok, shift=0, zp=0, lo=-128, hi=127, mult=m1: check(f"requant {what}", gate_requant(acc, mult, shift, zp, lo, hi, q).ok, ok)
+    rq("100 * 0.5", 100, 50, True)
+    rq("100 * 0.5, 1 LSB up", 100, 51, True)
+    rq("100 * 0.5, 2 LSB up", 100, 52, False)
+    rq("100 * 0.5, 2 LSB down", 100, 48, False)
+    rq("101 * 0.5 = 50.5 rounds to 51; 50 is 1 LSB", 101, 50, True)
+    rq("101 * 0.5, 49", 101, 49, False)
+    rq("-101 * 0.5 = -50.5 rounds to -50; -52 is 2 LSB", -101, -52, False)
+    rq("shift -3: 100 * 0.5 / 8 = 6.25", 100, 6, True, shift=-3)
+    rq("shift -3, 8", 100, 8, False, shift=-3)
+    rq("shift 2: 10 * 0.5 * 4 = 20", 10, 20, True, shift=2)
+    rq("zero point 7", 100, 57, True, zp=7)
+    rq("zero point 7 left out", 100, 50, False, zp=7)
+    rq("clamp to 127", 1000, 127, True)
+    rq("clamp to 127, out 120", 1000, 120, False)
+    rq("clamp min 3 (ReLU at zp 3)", -1000, 3, True, zp=3, lo=3)
+    rq("8-bit word 0xCE (-50)", -100, 0xCE, True)
+    check("requant_ref exact near 2^62", [int(requant_ref(-2**31, 2**31 - 1, s, 0, -2**40, 2**40)[0]) for s in (0, -31)], [-(2**31 - 1), -1])
+    check("requant worst LSBs", gate_requant([100, 100], m1, 0, 0, -128, 127, [50, 53]).worst_lsb, 3)
+    # max pooling: the max of each window of the actual inputs, padded with -Inf (int8: -128)
+    x = np.arange(16.0).reshape(4, 4) - 8.0
+    xw = encode("fp32", x)
+    pw2 = maxpool_ref(x, 2, 2, 1, -np.inf)
+    check("maxpool_ref 2x2 pad 1", pw2.tolist(), [[-8.0, -6.0, -5.0], [0.0, 2.0, 3.0], [4.0, 6.0, 7.0]])
+    check("maxpool exact", gate_maxpool("fp32", xw, encode("fp32", pw2), 2, 2, 1).ok, True)
+    first = np.array([[x[0, 0], x[0, 1], x[0, 3]], [x[1, 0], x[1, 1], x[1, 3]], [x[3, 0], x[3, 1], x[3, 3]]])  # each window's first input
+    r = gate_maxpool("fp32", xw, encode("fp32", first), 2, 2, 1)
+    check("maxpool first element instead of the max", (r.ok, r.over), (False, 5))
+    check("maxpool -0 and +0 are one max", gate_maxpool("bf16", [[0x8000, 0x0000]], [0x8000], 1, 2, 0).ok, True)
+    xi = np.array([[-128, 5], [3, -7]])
+    check("maxpool int8, pad -128", gate_maxpool("int8", xi & 0xFF, np.array([-128, 5, 3, -7]) & 0xFF, 2, 2, 1).ok, True)
+    check("maxpool 1x1 is the identity", gate_maxpool("int8", xi, xi.ravel(), 1, 1, 0).ok, True)
+    check("maxpool 1x1, one differs", gate_maxpool("int8", xi, [-128, 5, 3, -6], 1, 1, 0).ok, False)
+    # dropout: exact against the mask
+    xd = encode("bf16", np.array([1.5, -2.0, 3.0, -0.0]))
+    keep = np.array([True, False, True, False])
+    do = lambda what, out, ok, **kw: check(f"dropout {what}", gate_dropout("bf16", xd, keep, encode("bf16", np.asarray(out, dtype=np.float64)),
+                                                                           0.5, kw.get("training", True)).ok, ok)
+    do("kept doubled, dropped 0", [3.0, -0.0, 6.0, 0.0], True)
+    do("kept not scaled", [1.5, 0.0, 3.0, 0.0], False)
+    do("a dropped one kept", [3.0, -4.0, 6.0, 0.0], False)
+    do("inference passes x", [1.5, -2.0, 3.0, -0.0], True, training=False)
+    do("inference, scaled", [3.0, -4.0, 6.0, 0.0], False, training=False)
+    check("dropout int8: dropped to zp", gate_dropout("int8", [10, 20], [True, False], [10, -5], 0.5, True, -5).ok, True)
+    check("dropout int8: dropped to 0, zp -5", gate_dropout("int8", [10, 20], [True, False], [10, 0], 0.5, True, -5).ok, False)
+    check("stage_line", stage_line(gate_matmul("fp32", [(Aw, Bw)], encode("fp32", tm))).startswith("TRUTH fp32 matmul: PASS  n 4  worst 0% of sum|ab|"), True)
+    check("merge", (lambda m: (m.ok, m.n, m.over))(merge([gate_requant(100, m1, 0, 0, -128, 127, 50), gate_requant(100, m1, 0, 0, -128, 127, 53)])),
+          (False, 2, 1))
     print(f"truth selftest: {checks[0]} checks, {fails[0]} failures")
     print(f"RESULT: {'PASSED' if fails[0] == 0 else 'FAILED'}")
     return fails[0]
