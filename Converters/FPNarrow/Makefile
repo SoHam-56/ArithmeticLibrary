@@ -7,7 +7,7 @@ TB_DIR  = $(PRJ_DIR)/testbenches
 RANDOM ?= 1000000
 $(shell mkdir -p $(PRJ_DIR)/Verilator)  # Verilator makes --Mdir but not its parent
 DESIGN  = $(PRJ_DIR)/src/fpNarrow.sv
-FLAGS   = --binary --timing --assert --sv -I$(TB_DIR) --Wno-WIDTHTRUNC --Wno-WIDTHEXPAND --Wno-WIDTHCONCAT --Wno-INITIALDLY $(EXTRA_FLAGS)
+FLAGS   = --binary --timing --assert --sv -I$(TB_DIR) --Wno-WIDTHTRUNC --Wno-WIDTHEXPAND --Wno-WIDTHCONCAT --Wno-INITIALDLY -j $(shell nproc) --build-jobs 0 $(EXTRA_FLAGS)
 V       = $(PRJ_DIR)/Verilator
 
 all: check check32 lint bad_format

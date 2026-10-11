@@ -9,7 +9,7 @@ $(shell mkdir -p $(PRJ_DIR)/Verilator)  # Verilator makes --Mdir but not its par
 RTL     = $(PRJ_DIR)/src/intMultiplier.sv
 DESIGN  = $(COMMON)/src/sienna_fmt_pkg.sv $(RTL)
 FLAGS   = --binary --timing --assert --sv -I$(COMMON)/testbenches -I$(TB_DIR) \
-          --Wno-WIDTHTRUNC --Wno-WIDTHEXPAND --Wno-WIDTHCONCAT --Wno-INITIALDLY $(EXTRA_FLAGS)
+          --Wno-WIDTHTRUNC --Wno-WIDTHEXPAND --Wno-WIDTHCONCAT --Wno-INITIALDLY -j $(shell nproc) --build-jobs 0 $(EXTRA_FLAGS)
 
 build:
 	verilator $(FLAGS) --top-module TB_intMultiplier --Mdir $(PRJ_DIR)/Verilator/ref $(DESIGN) \

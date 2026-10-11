@@ -25,6 +25,8 @@ VERILATOR_DIR = $(PRJ_DIR)/Verilator_$(FORMAT)
 VERILATOR_FLAGS = \
     --binary \
     --timing \
+    -j $(shell nproc) \
+    --build-jobs 0 \
     --assert \
     --top-module $(TOP_MODULE) \
     --sv \

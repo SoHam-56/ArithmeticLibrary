@@ -11,7 +11,7 @@ PLUSARGS ?=
 $(shell mkdir -p $(PRJ_DIR)/Verilator)  # Verilator makes --Mdir but not its parent
 DESIGN  = $(COMMON)/src/sienna_fmt_pkg.sv $(PRJ_DIR)/src/fpAdder.sv
 FLAGS   = --binary --timing --assert --sv -I$(COMMON)/testbenches -I$(TB_DIR) \
-          --Wno-WIDTHTRUNC --Wno-WIDTHEXPAND --Wno-WIDTHCONCAT --Wno-INITIALDLY $(EXTRA_FLAGS)
+          --Wno-WIDTHTRUNC --Wno-WIDTHEXPAND --Wno-WIDTHCONCAT --Wno-INITIALDLY -j $(shell nproc) --build-jobs 0 $(EXTRA_FLAGS)
 BF16    = -GEXP_W=8 -GMAN_W=7
 
 eq:
@@ -42,6 +42,6 @@ lint:
 	bash $(COMMON)/lint.sh "lint fpAdder EXP_W=8 MAN_W=23" -Wall -Wno-fatal -DSYNTHESIS --top-module fpAdder -GEXP_W=8 -GMAN_W=23 $(DESIGN)
 
 $(SF_LIB):
-	$(MAKE) -C $(SF)/build/Linux-x86_64-GCC
+	$(MAKE) -j$(shell nproc) -C $(SF)/build/Linux-x86_64-GCC
 
 .PHONY: eq verilator check vivado_tb vectors lint

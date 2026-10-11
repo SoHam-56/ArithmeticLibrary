@@ -14,7 +14,7 @@ V        = $(PRJ_DIR)/Verilator
 DESIGN   = $(PRJ_DIR)/src/tfliteAdd.sv
 PKG      = $(PRJ_DIR)/../Common/src/sienna_fmt_pkg.sv
 COMMON   = $(PRJ_DIR)/../Common
-FLAGS    = --binary --timing --assert --sv -I$(TB_DIR) --Wno-WIDTHTRUNC --Wno-WIDTHEXPAND --Wno-WIDTHCONCAT --Wno-INITIALDLY $(EXTRA_FLAGS)
+FLAGS    = --binary --timing --assert --sv -I$(TB_DIR) --Wno-WIDTHTRUNC --Wno-WIDTHEXPAND --Wno-WIDTHCONCAT --Wno-INITIALDLY -j $(shell nproc) --build-jobs 0 $(EXTRA_FLAGS)
 GEN      = $(PYTHON) $(TB_DIR)/gen_add_vectors.py
 CHECK    = $(PYTHON) $(TB_DIR)/check_add.py
 BUILD    = verilator $(FLAGS) -GROUNDING='"$(ROUNDING)"' --top-module TB_tfliteAdd --Mdir $(V)/$(RLOW) $(PKG) $(DESIGN) $(TB_DIR)/TB_tfliteAdd.sv -o sim

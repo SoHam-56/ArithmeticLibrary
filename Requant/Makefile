@@ -10,7 +10,7 @@ RLOW     = $(shell echo $(ROUNDING) | tr A-Z a-z)
 DESIGN   = $(PRJ_DIR)/src/tfliteRequant.sv
 PKG      = $(PRJ_DIR)/../Common/src/sienna_fmt_pkg.sv
 COMMON   = $(PRJ_DIR)/../Common
-FLAGS    = --binary --timing --assert --sv -I$(TB_DIR) --Wno-WIDTHTRUNC --Wno-WIDTHEXPAND --Wno-WIDTHCONCAT --Wno-INITIALDLY $(EXTRA_FLAGS)
+FLAGS    = --binary --timing --assert --sv -I$(TB_DIR) --Wno-WIDTHTRUNC --Wno-WIDTHEXPAND --Wno-WIDTHCONCAT --Wno-INITIALDLY -j $(shell nproc) --build-jobs 0 $(EXTRA_FLAGS)
 GEN      = python3 $(TB_DIR)/gen_requant_vectors.py
 
 verilator:

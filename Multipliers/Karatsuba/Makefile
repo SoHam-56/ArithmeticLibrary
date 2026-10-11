@@ -22,14 +22,16 @@ TOP_MODULE = TB_karatsuba
 VERILATOR_DIR = $(PRJ_DIR)/Verilator
 VCS_DIR       = $(PRJ_DIR)/VCS
 
-# Simulation threads; several simulations at once each need fewer (Verilator's threads spin, so oversubscribed runs crawl).
-SIM_THREADS ?= $(shell nproc)
+# Simulation threads: one, since a unit bench is small (8 threads measured 4.3x slower than 1 on GPNAE; several at once also spin).
+SIM_THREADS ?= 1
 
 VERILATOR_FLAGS = \
     --trace \
     --timing \
     --top-module $(TOP_MODULE) \
     --threads $(SIM_THREADS) \
+    -j $(shell nproc) \
+    --build-jobs 0 \
     --sv \
     -I$(SRC_DIR) \
     -I$(TB_DIR) \
