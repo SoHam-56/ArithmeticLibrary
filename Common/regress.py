@@ -90,13 +90,18 @@ def sim_threads(flags: str, cpus: int):
     return str(max(1, cpus // int(jobs.group(1))) if jobs.group(1) else 1)  # Verilator's threads spin: N simulations of all cores crawl
 
 
+def _cores() -> int:
+    """The cores this process may use: its affinity where the OS has one (Linux), else every core."""
+    return len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count() or 1
+
+
 def point_env(spec: Spec, name: str, flags: str = None, cpus: int = None) -> dict:
     """A point's environment: none of the caller's make variables, no waveforms, -O0 builds from N = 32 (-Os takes hours there), its share of the cores."""
     env = {k: v for k, v in os.environ.items() if k not in MAKE_VARS + tuple(spec.drop)}
     env["TRACE"] = "0"
     if spec.parse(name)["n"] >= 32:
         env["OPT_FAST"] = "-O0"
-    t = sim_threads(os.environ.get("MAKEFLAGS", "") if flags is None else flags, cpus or len(os.sched_getaffinity(0)))
+    t = sim_threads(os.environ.get("MAKEFLAGS", "") if flags is None else flags, cpus or _cores())
     if t:
         env["SIM_THREADS"] = t
     return spec.env(name, env)

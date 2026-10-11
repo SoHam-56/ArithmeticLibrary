@@ -150,6 +150,13 @@ def test_pow2_tiles_and_threads():
             os.environ.pop(k) if v is None else os.environ.__setitem__(k, v)
     assert small["TRACE"] == big["TRACE"] == "0" and "OPT_FAST" not in small and big["OPT_FAST"] == "-O0" and par["SIM_THREADS"] == "4"
     assert not {"SIM_THREADS", "FMT", "EXTRA_FLAGS"} & (set(small) | set(big))  # the caller's variables never reach a point
+    affinity = os.__dict__.pop("sched_getaffinity", None)  # macOS has no sched_getaffinity: the share comes from os.cpu_count()
+    try:
+        env = regress.point_env(spec, "f1/N8_T2/run", "s -j2")
+    finally:
+        if affinity:
+            os.sched_getaffinity = affinity
+    assert env["SIM_THREADS"] == str(max(1, os.cpu_count() // 2)), env.get("SIM_THREADS")
 
 
 @selftest
