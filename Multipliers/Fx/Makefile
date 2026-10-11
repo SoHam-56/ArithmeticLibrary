@@ -35,6 +35,6 @@ vectors:
 	$(COMMON)/testbenches/generate_int_vectors.sh
 
 lint:
-	verilator --lint-only -Wall -Wno-fatal -DSYNTHESIS --top-module fxMac $(RTL)
+	$(COMMON)/lint.sh "lint fxMac" -Wall -Wno-fatal -DSYNTHESIS --top-module fxMac $(RTL)
 
 .PHONY: build verilator check sweep vivado_tb vectors lint

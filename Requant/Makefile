@@ -9,6 +9,7 @@ $(shell mkdir -p $(PRJ_DIR)/Verilator)  # Verilator makes --Mdir but not its par
 RLOW     = $(shell echo $(ROUNDING) | tr A-Z a-z)
 DESIGN   = $(PRJ_DIR)/src/tfliteRequant.sv
 PKG      = $(PRJ_DIR)/../Common/src/sienna_fmt_pkg.sv
+COMMON   = $(PRJ_DIR)/../Common
 FLAGS    = --binary --timing --assert --sv -I$(TB_DIR) --Wno-WIDTHTRUNC --Wno-WIDTHEXPAND --Wno-WIDTHCONCAT --Wno-INITIALDLY $(EXTRA_FLAGS)
 GEN      = python3 $(TB_DIR)/gen_requant_vectors.py
 
@@ -33,8 +34,8 @@ vectors:
 	$(GEN) $(TB_DIR)/vectors_single.mem --rounding SINGLE --random 10000
 
 lint:
-	for r in DOUBLE SINGLE; do \
-	  verilator --lint-only -Wall -Wno-fatal -DSYNTHESIS --top-module tfliteRequant -GROUNDING="\"$$r\"" $(PKG) $(DESIGN) || exit 1; done
+	$(COMMON)/lint.sh "lint tfliteRequant ROUNDING=DOUBLE" -Wall -Wno-fatal -DSYNTHESIS --top-module tfliteRequant -GROUNDING='"DOUBLE"' $(PKG) $(DESIGN)
+	$(COMMON)/lint.sh "lint tfliteRequant ROUNDING=SINGLE" -Wall -Wno-fatal -DSYNTHESIS --top-module tfliteRequant -GROUNDING='"SINGLE"' $(PKG) $(DESIGN)
 
 lint_bad:
 	@verilator --lint-only -Wno-fatal -Werror-USERFATAL --top-module tfliteRequant -GROUNDING='"NEAREST"' $(PKG) $(DESIGN) \

@@ -38,8 +38,8 @@ vectors: $(SF_LIB)
 	$(COMMON)/testbenches/generate_vectors.sh
 
 lint:
-	for f in "-GEXP_W=8 -GMAN_W=7" "-GEXP_W=8 -GMAN_W=23"; do \
-	  verilator --lint-only -Wall -Wno-fatal -DSYNTHESIS --top-module fpAdder $$f $(DESIGN) || exit 1; done
+	$(COMMON)/lint.sh "lint fpAdder EXP_W=8 MAN_W=7" -Wall -Wno-fatal -DSYNTHESIS --top-module fpAdder -GEXP_W=8 -GMAN_W=7 $(DESIGN)
+	$(COMMON)/lint.sh "lint fpAdder EXP_W=8 MAN_W=23" -Wall -Wno-fatal -DSYNTHESIS --top-module fpAdder -GEXP_W=8 -GMAN_W=23 $(DESIGN)
 
 $(SF_LIB):
 	$(MAKE) -C $(SF)/build/Linux-x86_64-GCC
