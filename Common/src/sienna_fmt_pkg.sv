@@ -62,6 +62,11 @@ package sienna_fmt_pkg;
     return 4;
   endfunction
 
+  // valid_i to done_o of tfliteAdd, TFLite's int8 ADD; an estimate until the logic-depth probe (sienna-int8-residual).
+  function automatic int qadd_lat();
+    return 6;
+  endfunction
+
   // The rounding of TFLite's reference kernels, pinned at G0: SIENNA's testbenches/tflite_int8/rounding.txt.
   localparam string REQ_ROUNDING = "DOUBLE";
 

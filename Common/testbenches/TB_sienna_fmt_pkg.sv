@@ -13,6 +13,7 @@ module TB_sienna_fmt_pkg;
   localparam bit INT8 = is_int(0);
   localparam int FX8 = fx_lat();
   localparam int RQ8 = req_lat();
+  localparam int QA8 = qadd_lat();
 
   task automatic expect_eq(input string what, input longint got, input longint want);
     if (got != want) begin
@@ -59,6 +60,8 @@ module TB_sienna_fmt_pkg;
     expect_eq("INT8 localparam", INT8, 1);
     expect_eq("FX8 localparam", FX8, 2);
     expect_eq("RQ8 localparam", RQ8, 4);
+    expect_eq("qadd_lat()", qadd_lat(), 6);
+    expect_eq("QA8 localparam", QA8, 6);
     expect_eq("OUT16 localparam", OUT16, 16);
     expect_eq("AMAN16 localparam", AMAN16, 23);
     expect_eq("1.0", from_fp32(32'h3F800000, 7), 32'h3F80);
