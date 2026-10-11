@@ -19,11 +19,6 @@ COPY_SKIP_PREFIX = ("Verilator", "VIVADO")
 SIZES, SIZES_SMALL = (8, 16, 32, 64), (8, 16)  # SMALL=1: what a 16 GB machine can build
 
 
-def pow2_tiles(n: int) -> list:
-    """Every power-of-2 tile size that divides N, e.g. N = 16: [2, 4, 8, 16]."""
-    return [2 ** i for i in range(1, n.bit_length()) if n % 2 ** i == 0]
-
-
 class Spec:
     """One repo's regression: its points and each point's command, environment, verdict and reason not to run."""
 
@@ -122,7 +117,7 @@ def _repo_files(repo: str, rel: str = "") -> list:
 
 
 def copy_tree(src: str, dst: str) -> None:
-    """Copies the tree as a fresh checkout holds it: git's files without the ignored outputs (stale stimulus, builds, results)."""
+    """Copies the working tree's git files, tracked and untracked but not ignored, of the repo and its submodules: edits included, stale stimulus, builds and results left out."""
     if os.path.exists(os.path.join(src, ".git")):
         files = _repo_files(src)
     else:

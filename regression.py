@@ -135,8 +135,7 @@ class FakeSpec(regress.Spec):
 
 
 @selftest
-def test_pow2_tiles_and_threads():
-    assert [regress.pow2_tiles(n) for n in (8, 16, 64)] == [[2, 4, 8], [2, 4, 8, 16], [2, 4, 8, 16, 32, 64]]
+def test_threads_and_environment():
     for flags, want in (("s", None), ("", None), ("s -j4 --jobserver-auth=3,4", "2"), ("s -j3 --jobserver-auth=3,4", "2"), ("s -j16", "1"),
                         ("s -j", "1"), ("ks -j1", "8"), (" -- TEST=x", None)):
         assert regress.sim_threads(flags, 8) == want, (flags, regress.sim_threads(flags, 8), want)
