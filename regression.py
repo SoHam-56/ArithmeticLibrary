@@ -5,6 +5,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -40,6 +41,8 @@ POINTS = [  # (unit, target, need, bad, firing scan)
     ("Converters/FPNarrow", "all", TB + (r"^bad_format OK:", r"^fpNarrow lint \(MAN_W 7, 23\): 0 warnings, 0 errors$"), TB_BAD, True),
 ]
 CREDIT_OK = 11  # TB_credit_link: 8 (STAGES, MODE) runs and 3 $fatal modes, one 'credit OK' line each
+LINT_RUNS = {"Adders/FP/lint": 2, "Adders/Int/lint": 1, "Multipliers/FP/lint": 2, "Multipliers/Int/lint": 2, "Multipliers/Fx/lint": 1,
+             "Requant/lint": 2}  # Common/lint.sh lines each lint prints, one per configuration
 TABLE = {f"{u}/{t}": (u, t, need, bad, firing) for u, t, need, bad, firing in POINTS}
 
 
@@ -68,6 +71,9 @@ class ArilSpec(regress.Spec):
             return regress.marker_verdict(text, rc, need=(r"^ALL \d+ PASSED$",))
         _, t, need, bad, firing = TABLE[name]
         v = regress.marker_verdict(text, rc, need, bad, firing)
+        if v == "PASS" and name in LINT_RUNS:  # a clean exit is not a lint: each configuration's count line, with 0 errors
+            n = len(re.findall(r"^lint .*: \d+ warnings, 0 errors$", regress.ANSI.sub("", text), re.M))
+            v = "PASS" if n == LINT_RUNS[name] else f"FAIL ({n} of {LINT_RUNS[name]} lint runs counted)"
         if v == "PASS" and t == "credit":
             n = len([x for x in regress.ANSI.sub("", text).splitlines() if x.startswith("credit OK: ")])
             v = "PASS" if n == CREDIT_OK else f"FAIL ({n} of {CREDIT_OK} credit checks passed)"
@@ -166,6 +172,10 @@ def test_verdict_rules():
     assert SPEC.verdict("Multipliers/Karatsuba/verilator", "PASS: Unsigned(10) and Signed(10) vectors passed.\n", 0) == "PASS"
     assert SPEC.verdict("Multipliers/FP/check", "RESULT: PASSED\nmul bf16: 0 results checked\n", 0) == "FAIL (no 'checked against fpu\\.py, 0 mismatches')"
     assert SPEC.verdict("selftest", "ALL 9 PASSED\n", 0) == "PASS" and SPEC.verdict("selftest", "1 of 9 FAILED\n", 0).startswith("FAIL")
+    two = "lint fpAdder EXP_W=8 MAN_W=7: 3 warnings, 0 errors\nlint fpAdder EXP_W=8 MAN_W=23: 2 warnings, 0 errors\n"
+    assert SPEC.verdict("Adders/FP/lint", two, 0) == "PASS" and SPEC.verdict("Adders/FP/lint", "", 0) == "FAIL (0 of 2 lint runs counted)"  # a clean exit is not a lint
+    assert SPEC.verdict("Adders/FP/lint", two.split("\n")[0] + "\n", 0) == "FAIL (1 of 2 lint runs counted)"
+    assert SPEC.verdict("Adders/FP/lint", two.replace("0 errors\nlint fpAdder EXP_W=8 MAN_W=23", "1 errors\nlint fpAdder EXP_W=8 MAN_W=23"), 0).startswith("FAIL")
 
 
 @selftest
@@ -182,6 +192,9 @@ def test_points_and_commands():
         t = "verilator" if u == "Multipliers/FPWiden" else t
         r = subprocess.run(["make", "-n", "-C", os.path.join(ROOT, u), t], capture_output=True, text=True, env={k: v for k, v in os.environ.items() if not k.startswith("MAKE")})
         assert r.returncode == 0, (name, r.stderr[-200:])
+    for name in [p for p in pts if p.endswith("/lint")]:  # every lint prints its counts, one line per configuration
+        r = subprocess.run(["make", "-n", "-C", os.path.join(ROOT, name[:-5]), "lint"], capture_output=True, text=True)
+        assert r.stdout.count("Common/lint.sh") == LINT_RUNS[name], (name, r.stdout[-300:])
     for u in ("Adders/FP32", "Multipliers/FP32", "Multipliers/Karatsuba"):  # the threaded benches take their share under make -j
         r = subprocess.run(["make", "-n", "-C", os.path.join(ROOT, u), "verilator", "SIM_THREADS=3"], capture_output=True, text=True)
         assert "--threads 3" in r.stdout, (u, r.stdout[-300:])
