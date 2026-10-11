@@ -101,3 +101,36 @@ def quantize_multiplier(real: float, rounding: str = "DOUBLE"):
     if rounding == "SINGLE" and shift > 30:  # TFLITE_SINGLE_ROUNDING saturates the shift
         return (1 << 31) - 1, 30
     return q_fixed, shift
+
+
+ADD_LEFT_SHIFT = 20  # TFLite add.cc Prepare: the inputs' left shift for int8 (15 for int16)
+
+
+def quantize_multiplier_smaller_than_one_exp(real: float):
+    """TFLite QuantizeMultiplierSmallerThanOneExp: QuantizeMultiplier of 0 < real < 1, whose shift must come out <= 0."""
+    if not 0.0 < real < 1.0:
+        raise ValueError(f"QuantizeMultiplierSmallerThanOneExp needs 0 < real < 1, got {real!r}")
+    mult, shift = quantize_multiplier(real)
+    if shift > 0:
+        raise ValueError(f"QuantizeMultiplierSmallerThanOneExp: {real!r} rounds to shift {shift} > 0")
+    return mult, shift
+
+
+def add_params(s1, s2, s_out) -> dict:
+    """TFLite int8 ADD Prepare from the tensors' float32 scales, in doubles: tflite_add's m1, s1, m2, s2, mo, so."""
+    f1, f2, fo = (float(np.float32(s)) for s in (s1, s2, s_out))
+    twice_max = float(np.float32(2.0) * np.float32(max(f1, f2)))  # 2 * std::max of floats: a float, exact
+    m1, sh1 = quantize_multiplier_smaller_than_one_exp(f1 / twice_max)
+    m2, sh2 = quantize_multiplier_smaller_than_one_exp(f2 / twice_max)
+    mo, sho = quantize_multiplier_smaller_than_one_exp(twice_max / float(np.float32(1 << ADD_LEFT_SHIFT) * np.float32(fo)))
+    return dict(m1=m1, s1=sh1, m2=m2, s2=sh2, mo=mo, so=sho)
+
+
+def tflite_add(q1, q2, zp1, zp2, m1, s1, m2, s2, mo, so, zpo, amin, amax, rounding):
+    """TFLite reference int8 ADD (integer_ops/add.h): (q - zp) << 20 per input, each scaled, summed, rescaled, + zpo, max then min."""
+    for s in (s1, s2, so):
+        assert np.all(np.asarray(s) <= 0), "MultiplyByQuantizedMultiplierSmallerThanOneExp needs shift <= 0"
+    a1 = mbqm((sx(q1, 8) - sx(zp1, 8)) << ADD_LEFT_SHIFT, m1, s1, rounding)
+    a2 = mbqm((sx(q2, 8) - sx(zp2, 8)) << ADD_LEFT_SHIFT, m2, s2, rounding)
+    raw = sx(mbqm(sx(a1 + a2, 32), mo, so, rounding) + sx(zpo, 8), 32)
+    return np.minimum(np.maximum(raw, sx(amin, 8)), sx(amax, 8))

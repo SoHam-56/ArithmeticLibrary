@@ -110,6 +110,33 @@ QM = [  # real -> (mult, shift): frexp, then the mantissa * 2^31 rounded half aw
     (0.5 + 2.0 ** -32, ((1 << 30) + 1, 0)),  # 2^30 + 0.5 rounds away from zero; numpy.round would give 2^30
 ]
 
+QMS = [  # real -> QuantizeMultiplierSmallerThanOneExp: QuantizeMultiplier with shift <= 0
+    (0.5, (1 << 30, 0)),
+    (0.25, (1 << 30, -1)),
+    (0.75, (1610612736, 0)),
+    (2.0 ** -31, (1 << 30, -30)),
+    (2.0 ** -33, (0, 0)),  # shift -32 flushes to (0, 0), which TFLite accepts (shift 0 <= 0)
+]
+QMS_BAD = [1.0, 0.0, -0.5, 2.0, 1.0 - 2.0 ** -40]  # the last rounds to 2^31: halved, shift 1 > 0, TFLite's CHECK fails
+P_EQ = dict(m1=1 << 30, s1=0, m2=1 << 30, s2=0, mo=1 << 30, so=-19)  # add_params(0.5, 0.5, 1.0): 0.5, 0.5, 2^-20
+P_UN = dict(m1=1 << 30, s1=-1, m2=1 << 30, s2=0, mo=1431655765, so=-19)  # add_params(0.25, 0.5, 0.75): 0.25, 0.5, 1/(0.75 * 2^20)
+P_WIDE = dict(m1=1 << 30, s1=-10, m2=1 << 30, s2=0, mo=1 << 30, so=-15)  # add_params(2^-10, 1, 2^-3): scale ratio 2^10
+ADD = [  # q1, q2, zp1, zp2, words, zpo, amin, amax, DOUBLE, SINGLE; P_EQ gives y = (d1 + d2) / 2
+    (10, 6, 0, 0, P_EQ, 0, -128, 127, 8, 8),
+    (1, 0, 0, 0, P_EQ, 0, -128, 127, 1, 1),  # +0.5: away (DOUBLE) and up (SINGLE) agree
+    (-1, 0, 0, 0, P_EQ, 0, -128, 127, -1, 0),  # -0.5: DOUBLE away from zero, SINGLE toward +inf
+    (3, 0, 0, 0, P_EQ, 0, -128, 127, 2, 2),  # +1.5
+    (-3, 0, 0, 0, P_EQ, 0, -128, 127, -2, -1),  # -1.5
+    (127, -128, -128, 127, P_EQ, 5, -128, 127, 5, 5),  # d1 = 255, d2 = -255: 0 + zpo
+    (127, 127, 0, 0, P_EQ, 0, -128, 100, 100, 100),  # 127 clamped to act_max
+    (-128, -128, 0, 0, P_EQ, 0, -128, 127, -128, -128),
+    (0, 0, 0, 0, P_EQ, 0, 20, 10, 10, 10),  # act_min > act_max: max then min gives act_max
+    (100, 50, 0, 0, dict(P_EQ, m1=0), 3, -128, 127, 28, 28),  # a flushed multiplier drops input 1: 50 / 2 + 3
+    (12, 3, 0, 0, P_UN, 0, -128, 127, 6, 6),  # (0.25 * 12 + 0.5 * 3) / 0.75 = 6
+    (-12, -3, 0, 0, P_UN, 0, -128, 127, -6, -6),
+    (0x80, 0x7F, 0, 0, P_EQ, 0, 0x80, 0x7F, -1, 0),  # 8-bit patterns: -128 + 127 = -1, so -0.5; clamp patterns read signed
+]
+
 
 def wrap32(v):
     return ((v + (1 << 31)) & 0xFFFFFFFF) - (1 << 31)
@@ -137,6 +164,13 @@ def c_mbqm(x, m, s, rounding):  # common.cc, both builds
 
 def c_requant(x, m, s, zp, lo, hi, rounding):
     return min(max(wrap32(c_mbqm(x, m, s, rounding) + zp), lo), hi)
+
+
+def c_add(q1, q2, zp1, zp2, m1, s1, m2, s2, mo, so, zpo, lo, hi, rounding):  # reference integer_ops/add.h AddFunc, line for line
+    a1 = c_mbqm(wrap32((q1 - zp1) * (1 << 20)), m1, s1, rounding)
+    a2 = c_mbqm(wrap32((q2 - zp2) * (1 << 20)), m2, s2, rounding)
+    raw = wrap32(c_mbqm(wrap32(a1 + a2), mo, so, rounding) + zpo)
+    return min(hi, max(lo, raw))
 
 
 def half_away(num, den):  # exact nearest of num / den, ties away from zero
@@ -225,6 +259,61 @@ def main() -> None:
     check("fx_mac random", ipu.fx_mac(np.array(X), np.array(Y), np.array(C)),
           [max(-32768, min(32767, ((x * y) >> 11) + c)) for x, y, c in zip(X, Y, C)])
     check("int_add random", ipu.int_add(na, nb), [wrap32(a + b) for a, b in zip(A, B)])
+
+    for real, want in QMS:
+        check(f"quantize_multiplier_smaller_than_one_exp({real!r})", ipu.quantize_multiplier_smaller_than_one_exp(real), want)
+    for real in QMS_BAD:
+        try:
+            ipu.quantize_multiplier_smaller_than_one_exp(real)
+            check(f"quantize_multiplier_smaller_than_one_exp({real!r}) raises", "returned", "ValueError")
+        except ValueError:
+            check(f"quantize_multiplier_smaller_than_one_exp({real!r}) raises", "ValueError", "ValueError")
+    check("add_params(0.5, 0.5, 1.0)", sorted(ipu.add_params(0.5, 0.5, 1.0).items()), sorted(P_EQ.items()))
+    check("add_params(0.25, 0.5, 0.75)", sorted(ipu.add_params(0.25, 0.5, 0.75).items()), sorted(P_UN.items()))
+    check("add_params(2^-10, 1, 2^-3)", sorted(ipu.add_params(2.0 ** -10, 1.0, 2.0 ** -3).items()), sorted(P_WIDE.items()))
+    check("add_params is symmetric", sorted(ipu.add_params(0.5, 0.25, 0.75).items()),
+          sorted(dict(P_UN, m1=P_UN["m2"], s1=P_UN["s2"], m2=P_UN["m1"], s2=P_UN["s1"]).items()))
+    check("ADD_LEFT_SHIFT", ipu.ADD_LEFT_SHIFT, 20)
+    for q1, q2, z1, z2, p, zo, lo, hi, d, sg in ADD:
+        for r, w in (("DOUBLE", d), ("SINGLE", sg)):
+            check(f"tflite_add({q1}, {q2}, {z1}, {z2}, {p}, {zo}, {lo}, {hi}, {r})",
+                  ipu.tflite_add(q1, q2, z1, z2, p["m1"], p["s1"], p["m2"], p["s2"], p["mo"], p["so"], zo, lo, hi, r), w)
+    # Every (q1, q2) pair at three constant sets against the transcription, both roundings.
+    g1, g2 = (np.arange(1 << 16) >> 8) - 128, (np.arange(1 << 16) & 255) - 128
+    sets = [(0, 0, P_EQ, 0, -128, 127), (-7, 33, P_UN, 12, 12, 127), (127, -128, P_WIDE, -100, -128, 6)]
+    for z1, z2, p, zo, lo, hi in sets:
+        for r in ipu.ROUNDINGS:
+            got = ipu.tflite_add(g1, g2, z1, z2, p["m1"], p["s1"], p["m2"], p["s2"], p["mo"], p["so"], zo, lo, hi, r)
+            want = [c_add(int(a), int(b), z1, z2, p["m1"], p["s1"], p["m2"], p["s2"], p["mo"], p["so"], zo, lo, hi, r)
+                    for a, b in zip(g1, g2)]
+            check(f"tflite_add exhaustive {r} zp {z1} {z2} {zo}", got, want)
+    # Random constants (any int32 multiplier, every shift in [-31, 0]) against the transcription.
+    Q = [rng.randint(-128, 127) for _ in range(n)]
+    Q2 = [rng.randint(-128, 127) for _ in range(n)]
+    SH = [[rng.randint(-31, 0) for _ in range(n)] for _ in range(3)]
+    M3 = [[r32() for _ in range(n)] for _ in range(3)]
+    for r in ipu.ROUNDINGS:
+        got = ipu.tflite_add(np.array(Q), np.array(Q2), nz, np.array(LO), np.array(M3[0]), np.array(SH[0]), np.array(M3[1]),
+                             np.array(SH[1]), np.array(M3[2]), np.array(SH[2]), np.array(HI), np.array(LO), np.array(HI), r)
+        want = [c_add(*t, r) for t in zip(Q, Q2, Z, LO, M3[0], SH[0], M3[1], SH[1], M3[2], SH[2], HI, LO, HI)]
+        check(f"tflite_add random {r}", got, want)
+    # tfliteAdd's stage-1 forms: DOUBLE SRDHM(d << 20, m) = (d m + 2^10) >> 11; SINGLE MBQM(d << 20, m, s) = (d m + 2^(10 - s)) >> (11 - s).
+    ms = [0, 1, H - 1, H, H + 1, MAX - 1, MAX, MIN, MIN + 1, -1, -H] + [r32() for _ in range(40)]
+    d = np.arange(-255, 256)
+    bad = 0
+    for m in ms:
+        bad += int(np.sum(ipu.srdhm(d << 20, m) != (d * m + 1024) >> 11))
+        for s in range(-31, 1):
+            bad += int(np.sum(ipu.mbqm(d << 20, m, s, "SINGLE") != (d * m + (1 << (10 - s))) >> (11 - s)))
+    check("tfliteAdd stage-1 forms", bad, 0)
+    # The value bounds the RTL's widths rest on: |scaled| < 2^28, so |sum| < 2^29.
+    worst = max(abs(int(ipu.mbqm(dd << 20, m, s, r))) for dd in (255, -255) for m in (MIN, MAX) for s in (0, -1) for r in ipu.ROUNDINGS)
+    check("|scaled| < 2^28", worst < (1 << 28), True)
+    # The ADD is symmetric: swapping the inputs with their constants gives the same codes.
+    for r in ipu.ROUNDINGS:
+        a = ipu.tflite_add(g1, g2, -7, 33, 1 << 30, -1, 1610612736, 0, 1431655765, -19, 12, -128, 127, r)
+        b = ipu.tflite_add(g2, g1, 33, -7, 1610612736, 0, 1 << 30, -1, 1431655765, -19, 12, -128, 127, r)
+        check(f"tflite_add symmetric {r}", a, b)
 
     print(f"test_ipu: {checks} checks, {fails} failures")
     print(f"RESULT: {'PASSED' if fails == 0 else 'FAILED'}")
