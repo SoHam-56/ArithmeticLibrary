@@ -245,6 +245,7 @@ def main(spec: Spec, argv=None) -> None:
     ap.add_argument("--formats", default=None, help="comma-separated formats (default: every format)")
     ap.add_argument("--model-dir", default="", help="points that need a model directory")
     a, _ = ap.parse_known_args(argv)
+    a.model_dir = os.path.abspath(a.model_dir) if a.model_dir else ""  # a point runs in a private copy, where a relative path names nothing
     if a.action == "points":
         print("\n".join(spec.points(a.small, _formats(spec, a.formats))))
     elif a.action == "point":

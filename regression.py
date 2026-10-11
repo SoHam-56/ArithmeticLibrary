@@ -236,6 +236,21 @@ def test_point_runs_in_a_copy():
         assert code == 1 and rec["not_run"] == "DIR unset: make regression DIR=<d>" and "cwd" not in log and "f1/N8_T2/mod: NOT RUN (DIR unset" in out, (rec, out)
         assert point("f1/N8_T2/mod", "1", model_dir="/m")[0] == 0
         assert _exit(regress.run_point, spec, _args(name="f9/x", results=res))[0] != 0  # a name the spec does not run
+        class DirSpec(FakeSpec):  # the point sees the directory it was given, made absolute where make regression ran
+            def argv(self, name, opts):
+                return [sys.executable, "-c", f"print('dir ' + {opts.model_dir!r}); print('ok')"]
+
+            def not_run(self, name, opts):
+                return None if os.path.isabs(opts.model_dir) else f"relative {opts.model_dir}"
+        os.makedirs(os.path.join(d, "models"))
+        here = os.getcwd()
+        os.chdir(d)
+        try:
+            code, _ = _exit(regress.main, DirSpec(src, res), ["--action", "point", "--name", "f1/N8_T2/mod", "--results", res, "--model-dir", "models"])
+        finally:
+            os.chdir(here)
+        log = open(os.path.join(res, "f1/N8_T2/mod.log")).read()
+        assert code == 0 and f"dir {os.path.join(d, 'models')}" in log, log  # a relative MODEL_DIR would not exist in the private copy
 
 
 def _fake_results(spec, d, pts, run="r1", skip=(), stale=(), not_run=(), text=None, rc=None):
