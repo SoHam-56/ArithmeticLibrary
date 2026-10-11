@@ -308,6 +308,8 @@ def test_summary():
         code, _ = _exit(regress.summary, spec, _args(action="summary", results=d, small=True))
         assert code == 1 and f"FAIL: 0 of {gated} gated points passed, {gated} NOT RUN (no point ran)" in table(d), table(d)
         assert _exit(regress.summary, spec, _args(action="summary", results=d, formats="f9"))[0] != 0  # a format the repo does not have
+        with contextlib.redirect_stderr(io.StringIO()):
+            assert _exit(regress.main, spec, ["--action", "points", "--smal"])[0] != 0  # a mistyped option is an error, not the full sweep
 
 
 @selftest

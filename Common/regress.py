@@ -240,7 +240,7 @@ def summary(spec: Spec, a) -> None:
 
 def main(spec: Spec, argv=None) -> None:
     """--action points (the list), point (one point), summary (the table)."""
-    ap = argparse.ArgumentParser(description=f"{spec.title}: make regression's points and table")
+    ap = argparse.ArgumentParser(description=f"{spec.title}: make regression's points and table", allow_abbrev=False)
     ap.add_argument("--action", choices=("points", "point", "summary"), required=True)
     ap.add_argument("--name", help="point: its name, as --action points lists it")
     ap.add_argument("--results", default=spec.results)
@@ -249,7 +249,7 @@ def main(spec: Spec, argv=None) -> None:
     ap.add_argument("--small", action="store_true", help="N = 8 and 16 only")
     ap.add_argument("--formats", default=None, help="comma-separated formats (default: every format)")
     ap.add_argument("--model-dir", default="", help="points that need a model directory")
-    a, _ = ap.parse_known_args(argv)
+    a = ap.parse_args(argv)
     a.model_dir = os.path.abspath(a.model_dir) if a.model_dir else ""  # a point runs in a private copy, where a relative path names nothing
     if a.action == "points":
         print("\n".join(spec.points(a.small, _formats(spec, a.formats))))
