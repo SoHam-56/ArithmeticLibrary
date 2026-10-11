@@ -19,7 +19,7 @@ TB_BAD = (r"RESULT: FAILED", r"^FAILURE:")
 LINT_BAD = (r"^%Warning-(?:LATCH|MULTIDRIVEN|UNOPTFLAT).*$",)
 POINTS = [  # (unit, target, need, bad, firing scan)
     ("Common", "pkg", TB, TB_BAD, True), ("Common", "dump32", TB, TB_BAD, True), ("Common", "ipu", TB, TB_BAD, True),
-    ("Common", "fpu", TB, TB_BAD, True),
+    ("Common", "fpu", TB, TB_BAD, True), ("Common", "truth", TB + (r"^truth selftest: \d+ checks, 0 failures$",), TB_BAD, True),
     ("Common", "credit", (r"^credit lint: 0 warnings, 0 errors$",), (r"credit FAIL",), False),  # and CREDIT_OK 'credit OK' lines; the fault modes' lines quote the assertions they fire
     ("Adders/FP", "eq", TB, TB_BAD, True), ("Adders/FP", "check", TB + (r"checked against fpu\.py, 0 mismatches",), TB_BAD, True),
     ("Adders/FP", "vivado_tb", TB, TB_BAD, True), ("Adders/FP", "lint", (), LINT_BAD, True),
@@ -177,6 +177,9 @@ def test_verdict_rules():
     assert SPEC.verdict("Adders/FP32/verilator", "FAILURE: 3 errors detected.\n", 0).startswith("FAIL")
     assert SPEC.verdict("Multipliers/Karatsuba/verilator", "PASS: Unsigned(10) and Signed(10) vectors passed.\n", 0) == "PASS"
     assert SPEC.verdict("Multipliers/FP/check", "RESULT: PASSED\nmul bf16: 0 results checked\n", 0) == "FAIL (no 'checked against fpu\\.py, 0 mismatches')"
+    tr = "truth selftest: 126 checks, 0 failures\nRESULT: PASSED\ntest_truth: 97 checks, 0 failures\nRESULT: PASSED\n"
+    assert SPEC.verdict("Common/truth", tr, 0) == "PASS" and SPEC.verdict("Common/truth", tr.split("test_truth")[1], 0).startswith("FAIL (no 'truth selftest")  # the selftest must have run
+    assert SPEC.verdict("Common/truth", tr.replace("PASSED\ntest", "FAILED\ntest"), 0).startswith("FAIL (log: RESULT: FAILED")
     assert SPEC.verdict("selftest", "ALL 9 PASSED\n", 0) == "PASS" and SPEC.verdict("selftest", "1 of 9 FAILED\n", 0).startswith("FAIL")
     two = "lint fpAdder EXP_W=8 MAN_W=7: 3 warnings, 0 errors\nlint fpAdder EXP_W=8 MAN_W=23: 2 warnings, 0 errors\n"
     assert SPEC.verdict("Adders/FP/lint", two, 0) == "PASS" and SPEC.verdict("Adders/FP/lint", "", 0) == "FAIL (0 of 2 lint runs counted)"  # a clean exit is not a lint
