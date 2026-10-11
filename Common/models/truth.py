@@ -67,11 +67,6 @@ def fmax(fmt):
     return (2.0 - 2.0 ** -FLOATS[fmt]) * 2.0 ** 127
 
 
-def ovf(fmt):
-    """The smallest magnitude that rounds to Inf: max plus half an ulp."""
-    return 2.0 ** 128 - 2.0 ** (126 - FLOATS[fmt])
-
-
 def decode(fmt, w):
     """Bit patterns of fp32 or bf16 as float64, exactly (subnormals kept)."""
     w = np.asarray(w, dtype=np.int64)
@@ -97,7 +92,7 @@ def int8_codes(q):
 
 def _float_err(fmt, t, o):
     """Per-element error: 0 where a floor or the overflow rule passes, inf where a rule fails outright, else |o - t| / |t|."""
-    big = np.abs(t) >= ovf(fmt)
+    big = np.abs(t) > fmax(fmt)  # the true value overflows the format
     top = (np.abs(o) == fmax(fmt)) | np.isinf(o)
     ovf_ok = big & top & (np.sign(o) == np.sign(t))
     floor = (np.abs(o) <= F_FLOOR) & (np.abs(t) <= F_FLOOR)
@@ -239,9 +234,10 @@ def selftest() -> int:
     fl("bf16 selu max, out NaN", "bf16", "selu", bmax, bnan, False, 1)
     fl("fp32 selu max, out max", "fp32", "selu", 0x7F7FFFFF, 0x7F7FFFFF, True, 0)
     fl("fp32 selu max, out 2^127", "fp32", "selu", 0x7F7FFFFF, 0x7F000000, False, 1)
-    check("ovf(bf16) = 2^128 - 2^119", ovf("bf16"), 2.0 ** 128 - 2.0 ** 119)
-    with np.errstate(over="ignore"):
-        check("ovf(fp32) rounds to inf in float32", bool(np.isinf(np.float32(ovf("fp32")))) and not np.isinf(np.float32(np.nextafter(ovf("fp32"), 0))), True)
+    fl("bf16 selu 0x7F73 (true 3.3938e38, above max, rounds to max), out 0x7F7E", "bf16", "selu", 0x7F73, 0x7F7E, False, 1)
+    fl("bf16 selu 0x7F73, out max", "bf16", "selu", 0x7F73, bmax, True, 0)
+    fl("bf16 selu 0x7F72 (true 3.3798e38, below max), out 0x7F7D", "bf16", "selu", 0x7F72, 0x7F7D, True, 0)
+    check("fmax", (fmax("bf16"), fmax("fp32")), (float(decode("bf16", bmax)), float(np.finfo(np.float32).max)))
     # int8: within 1 LSB of the rounded true value, or within the bound dequantized
     tq = (4 / 128, 0, 1 / 128, 0)  # tanh: x = q / 32, out q / 128
     i8 = lambda what, func, q, o, ok, over=None, quant=tq, **kw: fl(what, "int8", func, q, o, ok, over, quant=quant, **kw)
