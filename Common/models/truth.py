@@ -164,12 +164,17 @@ def gate(fmt, func, x_in, out, bound=None, target=None, quant=None) -> Result:
                   int(lsb.max()), int(floor.sum()), int(big.sum()), [show(k) for k in miss[:FIRST]])
 
 
+def worst_text(worst) -> str:
+    """A worst error as text; an unbounded one is a NaN, Inf or overflow miss, or a nonzero output where the true value is 0."""
+    return f"{100 * worst:.3f}%" if np.isfinite(worst) else "unbounded (NaN, Inf, overflow, or nonzero where the true value is 0)"
+
+
 def line(r: Result, bound=None, target=None) -> str:
     """One report line for a result."""
     bound = BOUND if bound is None else bound
     target = TARGET if target is None else target
     lsb = f"  worst {r.worst_lsb} LSB" if r.fmt == "int8" else ""
-    w = f"{100 * r.worst:.3f}%" if np.isfinite(r.worst) else "a rule miss (NaN, Inf or overflow)"
+    w = worst_text(r.worst)
     return (f"TRUTH {r.fmt} {r.func}: {'PASS' if r.ok else 'FAIL'}  n {r.n}  worst {w} at x = {r.at:.6g}{lsb}  "
             f"over {100 * bound:g}%: {r.over}  over {100 * target:g}%: {r.over_target}  (floor {r.n_floor}, overflow {r.n_ovf})")
 
@@ -292,7 +297,8 @@ def selftest() -> int:
     check("misses listed", [m[0] for m in r.first], [1, 3])
     check("counts", (r.n, r.over, r.over_target), (4, 2, 3))
     check("line", line(r).startswith("TRUTH bf16 sigmoid: FAIL  n 4  worst "), True)
-    check("line names a rule miss", "worst a rule miss" in line(gate("bf16", "sigmoid", [0], [bnan])), True)
+    check("line names an unbounded miss", "worst unbounded" in line(gate("bf16", "sigmoid", [0], [bnan])), True)
+    check("worst_text", (worst_text(0.0123), worst_text(np.inf).startswith("unbounded")), ("1.230%", True))
     print(f"truth selftest: {checks[0]} checks, {fails[0]} failures")
     print(f"RESULT: {'PASSED' if fails[0] == 0 else 'FAILED'}")
     return fails[0]
