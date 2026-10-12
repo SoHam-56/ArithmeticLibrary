@@ -12,6 +12,7 @@ import time
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 FIRING = re.compile(r"^.*(?:Assertion failed|%Error).*$", re.M)  # a firing assertion leaves the exit status clean, so the log is the witness
+INTERNAL = re.compile(r"^.*(?:%Error: Internal Error|%Error: Verilator internal fault|\bV3\w+\.(?:cpp|h):\d+).*$", re.M)  # Verilator's own crash, not the design's
 MAKE_VARS = ("MAKEFLAGS", "MAKELEVEL", "MFLAGS", "MAKEOVERRIDES", "SMALL", "FMT", "REG_DIR", "REG_RUN", "EXTRA_FLAGS", "SIM_ARGS",
              "PLUSARGS", "TRACE", "OPT_FAST", "SIM_THREADS")  # a point checks the design as checked in, not the caller's variables
 COPY_SKIP_DIRS = (".git", "results", "__pycache__", "VCS")  # a tree without git: generated outputs a copy leaves out
@@ -151,7 +152,7 @@ def run_point(spec: Spec, a) -> None:
         sys.exit(f"error: {e}")
     base = os.path.join(os.path.abspath(a.results), a.name)
     os.makedirs(os.path.dirname(base), exist_ok=True)
-    for x in (".json", ".log"):  # a result left by an earlier run must not stand for this one
+    for x in (".json", ".log", ".attempt1.log"):  # a result left by an earlier run must not stand for this one
         if os.path.exists(base + x):
             os.remove(base + x)
     shutil.rmtree(base + ".artifacts", ignore_errors=True)
@@ -163,29 +164,52 @@ def run_point(spec: Spec, a) -> None:
         if rec["not_run"]:
             log.write(f"NOT RUN: {rec['not_run']}\n")
         else:
-            work = tempfile.mkdtemp(prefix="regression_point.")
-            try:
-                copy_tree(spec.root, work)
-                cmd, env = spec.argv(a.name, a), point_env(spec, a.name)
-                log.write(f"# command: {' '.join(cmd)}\n# env: {' '.join(f'{k}={env[k]}' for k in ('TRACE', 'OPT_FAST', 'SIM_THREADS') if k in env)}\n")
+            cmd, env = spec.argv(a.name, a), point_env(spec, a.name)
+            log.write(f"# command: {' '.join(cmd)}\n# env: {' '.join(f'{k}={env[k]}' for k in ('TRACE', 'OPT_FAST', 'SIM_THREADS') if k in env)}\n")
+            for attempt in (1, 2):  # a Verilator internal error gets one more attempt in a fresh copy; a test failure never does
+                start = log.tell()
+                _attempt(spec, a, base, cmd, env, log, rec)
                 log.flush()
-                rec["rc"] = subprocess.run(cmd, cwd=work, env=env, stdout=log, stderr=subprocess.STDOUT).returncode
-                if rec["rc"]:  # a failing point keeps its per-test logs and dumps
-                    for sub in spec.artifacts:
-                        r = os.path.join(work, sub)
-                        if os.path.isdir(r):
-                            shutil.copytree(r, os.path.join(base + ".artifacts", sub), dirs_exist_ok=True)
-            except Exception as e:  # noqa: BLE001  a point that cannot copy or start fails; it does not stop make regression
-                log.write(f"point did not run: {e!r}\n")
-                rec["rc"] = 127
-            finally:
-                shutil.rmtree(work, ignore_errors=True)
+                with open(base + ".log", errors="replace") as fh:
+                    fh.seek(start)
+                    crash = INTERNAL.search(ANSI.sub("", fh.read()))
+                if attempt == 2 or not crash:
+                    break
+                rec["retried"] = crash.group(0).strip().replace("%Error: ", "")[:120]  # without its %Error, so the verdict reads attempt 2 only
+                with open(base + ".log", errors="replace") as fh:
+                    fh.seek(start)
+                    open(base + ".attempt1.log", "w").write(fh.read())
+                log.seek(start)
+                log.truncate()
+                log.write(f"# retry: Verilator internal error in attempt 1 ({rec['retried']}), exit {rec['rc']}; its log is {base}.attempt1.log;"
+                          " running the point once more in a fresh copy\n")
+                print(f"{a.name}: Verilator internal error ({rec['retried'][:60]}); retrying once", flush=True)
+                shutil.rmtree(base + ".artifacts", ignore_errors=True)
         rec["secs"] = round(time.time() - t0, 1)
         log.write(f"# exit {rec['rc']} after {rec['secs']} s\n")
     json.dump(rec, open(base + ".json", "w"))
     v = f"NOT RUN ({rec['not_run']})" if rec["not_run"] else spec.verdict(a.name, open(base + ".log", errors="replace").read(), rec["rc"])
     print(f"{a.name}: {v}  {rec['secs']:.0f} s  {base}.log", flush=True)
     sys.exit(0 if v == "PASS" or a.keep_going else 1)
+
+
+def _attempt(spec: Spec, a, base: str, cmd: list, env: dict, log, rec: dict) -> None:
+    """One run of a point's command in a private copy of the tree; rec['rc'] its exit; a failing run keeps its artifacts."""
+    work = tempfile.mkdtemp(prefix="regression_point.")
+    try:
+        copy_tree(spec.root, work)
+        log.flush()
+        rec["rc"] = subprocess.run(cmd, cwd=work, env=env, stdout=log, stderr=subprocess.STDOUT).returncode
+        if rec["rc"]:  # a failing point keeps its per-test logs and dumps
+            for sub in spec.artifacts:
+                r = os.path.join(work, sub)
+                if os.path.isdir(r):
+                    shutil.copytree(r, os.path.join(base + ".artifacts", sub), dirs_exist_ok=True)
+    except Exception as e:  # noqa: BLE001  a point that cannot copy or start fails; it does not stop make regression
+        log.write(f"point did not run: {e!r}\n")
+        rec["rc"] = 127
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def summary(spec: Spec, a) -> None:
@@ -211,7 +235,8 @@ def summary(spec: Spec, a) -> None:
         else:
             text = open(base + ".log", errors="replace").read() if os.path.exists(base + ".log") else ""
             v, secs = (spec.verdict(p, text, rec.get("rc")) if text else "NOT RUN (result without its log)"), rec.get("secs", 0.0)
-        rows.append((p, v, p not in spec.reported, secs, base + ".log", rec is not None))
+        rows.append((p, v, p not in spec.reported, secs, base + ".log" + ("  (retried once after a Verilator internal error)" if rec and rec.get("retried") else ""),
+                     rec is not None))
     gated = [r for r in rows if r[2]]
     passed = sum(r[1] == "PASS" for r in gated)
     failed = sum(r[1].startswith("FAIL") for r in gated)

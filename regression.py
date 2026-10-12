@@ -266,6 +266,47 @@ def test_point_runs_in_a_copy():
         assert code == 0 and f"dir {os.path.join(d, 'models')}" in log, log  # a relative MODEL_DIR would not exist in the private copy
 
 
+@selftest
+def test_point_retries_a_verilator_internal_error():
+    with tempfile.TemporaryDirectory() as d:
+        src, res, cnt = os.path.join(d, "tree"), os.path.join(d, "res"), os.path.join(d, "count")
+        os.makedirs(src)
+        open(os.path.join(src, "a.txt"), "w").write("a")
+        spec = FakeSpec(src, res)
+        # The stub counts its attempts outside the copy; attempt k prints line[k] and exits code[k] (the last entry repeats), both read from a file.
+        script = os.path.join(d, "script.json")
+        stub = (f"import json, os, sys; p = {cnt!r}; k = int(open(p).read()) if os.path.exists(p) else 0; open(p, 'w').write(str(k + 1));"
+                f"lines, codes = json.load(open({script!r})); print(lines[min(k, len(lines) - 1)]); sys.exit(codes[min(k, len(codes) - 1)])")
+
+        def point(name, lines, codes):
+            if os.path.exists(cnt):
+                os.remove(cnt)
+            json.dump([lines, codes], open(script, "w"))
+            code, out = _exit(regress.run_point, spec, _args(name=name, results=res, run="r9", probe=stub))
+            base = os.path.join(res, name)
+            att = open(base + ".attempt1.log").read() if os.path.exists(base + ".attempt1.log") else None
+            return code, int(open(cnt).read()), open(base + ".log").read(), json.load(open(base + ".json")), out, att
+        ie = "%Error: Internal Error: TB.sv:379:21: ../V3FuncOpt.cpp:228: Inconsistent assignment"
+        fault = "%Error: Verilator internal fault, sorry. Suggest trying --debug --gdbbt"
+        for what, first in (("Internal Error", ie), ("internal fault", fault), ("V3 abort", "terminate called: ../V3Ast.h:1234: abort")):
+            code, n, log, rec, out, att = point("f1/N8_T2/run", [first, "ok"], [2, 0])
+            assert code == 0 and n == 2 and rec["rc"] == 0 and rec["retried"] and "f1/N8_T2/run: PASS" in out, (what, code, n, rec, out)
+            assert "# retry: Verilator internal error in attempt 1" in log and "%Error" not in log and log.endswith("ok\n# exit 0 after " + f"{rec['secs']} s\n"), (what, log)  # the verdict reads attempt 2
+            assert att is not None and first in att and "retrying once" in out, (what, att, out)
+        code, n, log, rec, out, att = point("f1/N8_T2/run", [ie], [2])  # an internal error twice: one retry only, and the point fails
+        assert code == 1 and n == 2 and rec["retried"] and ie in log and "FAIL" in out, (n, log, out)
+        code, n, log, rec, out, att = point("f1/N8_T2/run", ["no"], [3])  # a test failure is never retried
+        assert code == 1 and n == 1 and not rec.get("retried") and att is None and "# retry" not in log and "FAIL (exit 3)" in out, (n, rec, out)
+        code, n, log, rec, out, att = point("f1/N8_T2/run", ["ok\n%Error: TB.sv:12: the design's own error"], [0])  # a design %Error is no internal error
+        assert n == 1 and not rec.get("retried") and code == 1, (n, rec, out)
+        _fake_results(spec, os.path.join(d, "t"), ["f1/N8_T2/run"])
+        rec = json.load(open(os.path.join(d, "t", "f1/N8_T2/run.json")))
+        json.dump(dict(rec, retried="Internal Error: TB.sv:379:21"), open(os.path.join(d, "t", "f1/N8_T2/run.json"), "w"))
+        _exit(regress.summary, FakeSpec(src, ""), _args(action="summary", results=os.path.join(d, "t"), formats="f1", small=True, run="r1"))
+        row = next(x for x in open(os.path.join(d, "t", "regression.log")).read().splitlines() if x.startswith("f1/N8_T2/run"))
+        assert "PASS" in row and "retried once after a Verilator internal error" in row, row  # the table says which points were retried
+
+
 def _fake_results(spec, d, pts, run="r1", skip=(), stale=(), not_run=(), text=None, rc=None):
     """A result (.json and .log) for each point, as run_point writes them; a passing log unless text gives one."""
     for p in pts:
