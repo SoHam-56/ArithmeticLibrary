@@ -47,10 +47,14 @@ MUTANTS = [
     ("SELU alpha 1.67", "SELU_ALPHA = 1.6732632423543772848170429916717", "SELU_ALPHA = 1.67"),
     ("tanh as x", "return np.tanh(np.asarray(x, dtype=np.float64))", "return np.asarray(x, dtype=np.float64)"),
     ("matmul bound 2%", "MM_BOUND = 0.01", "MM_BOUND = 0.02"),
+    ("matmul int8 sums not wrapped", "np.abs(np.mod(o - t + 2**31, 2**32) - 2**31) if fmt == \"int8\" else np.abs(o - t)", "np.abs(o - t)"),
+    ("matmul int8 sums saturated", "np.abs(np.mod(o - t + 2**31, 2**32) - 2**31) if fmt == \"int8\" else np.abs(o - t)",
+     "np.abs(o - np.clip(t, -2**31, 2**31 - 1))"),
     ("matmul overflow sign ignored", "| np.isinf(o)) & (np.sign(o) == np.sign(t))", "| np.isinf(o))"),
     ("matmul no overflow rule", 'big = np.zeros(t.shape, dtype=bool) if fmt == "int8" else np.abs(t) > fmax("fp32")', "big = np.zeros(t.shape, dtype=bool)"),
     ("matmul floor dropped", "lim = np.maximum(bound * s, F_FLOOR)", "lim = bound * s"),
-    ("matmul bias left out", "t, s = t + b, s + np.abs(b)", "t, s = t, s + np.abs(b)"),
+    ("matmul bias left out", "        t = t + b", "        t = t"),
+    ("matmul bias in the scale", "        t = t + b", "        t, s = t + b, s + np.abs(b)"),
     ("matmul sum|ab| as |sum ab|", "s + np.abs(A) @ np.abs(B)", "s + np.abs(A @ B)"),
     ("matmul last pass only", "t, s = t + A @ B,", "t, s = A @ B,"),
     ("matmul operands' subnormals kept", "        return ftz(decode(fmt, w))", "        return decode(fmt, w)"),
@@ -176,7 +180,7 @@ def main():
     bias = rng.uniform(-1, 1, 4)
     t, s = truth.matmul_ref(list(zip(As, Bs)), bias)
     lt = [[math.fsum([As[p][i, k] * Bs[p][k, j] for p in range(3) for k in range(3)] + [bias[j]]) for j in range(4)] for i in range(5)]
-    ls = [[math.fsum([abs(As[p][i, k] * Bs[p][k, j]) for p in range(3) for k in range(3)] + [abs(bias[j])]) for j in range(4)] for i in range(5)]
+    ls = [[math.fsum([abs(As[p][i, k] * Bs[p][k, j]) for p in range(3) for k in range(3)]) for j in range(4)] for i in range(5)]
     check("matmul_ref against fsum loops", bool(np.allclose(t, lt, rtol=1e-14, atol=1e-14) and np.allclose(s, ls, rtol=1e-14)), True)
     x = rng.uniform(-9, 9, (6, 7))
     for ph, pw, pad in ((2, 2, 1), (3, 2, 0), (1, 1, 0), (2, 3, 1)):
