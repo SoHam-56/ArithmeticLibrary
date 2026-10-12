@@ -1,6 +1,6 @@
 `timescale 1ns / 100ps
 
-// TFLite's int8 requantize, bit-exact (DOUBLE: SRDHM then RoundingDivideByPOT; SINGLE: TFLITE_SINGLE_ROUNDING), 4 stages.
+// TFLite's int8 requantize, bit-exact (DOUBLE: SRDHM then RoundingDivideByPOT; SINGLE: TFLITE_SINGLE_ROUNDING), 4 stages; DOUBLE's left shift saturates where TFLite's overflows.
 module tfliteRequant #(
     parameter string ROUNDING = sienna_fmt_pkg::REQ_ROUNDING  // G0's variant; the DV overrides it to run both
 ) (
@@ -24,8 +24,16 @@ module tfliteRequant #(
     $fatal(1, "tfliteRequant: unsupported ROUNDING %s, use SINGLE or DOUBLE", ROUNDING);
   end
 
+  // DOUBLE's acc * 2^left saturated to int32: TFLite's int32 multiply overflows there (undefined), and a wrap flips the sign.
+  function automatic logic signed [31:0] sat_shl(input logic signed [31:0] a, input logic [4:0] sh);
+    automatic logic signed [62:0] w = 63'(a) <<< sh;
+    if (w > 63'(INT_MAX)) return INT_MAX;
+    if (w < 63'(INT_MIN)) return INT_MIN;
+    return w[31:0];
+  endfunction
+
   logic s1_v, s2_v, s3_v;
-  logic signed [31:0] s1_x, s1_m;  // DOUBLE: acc * 2^left wrapped to 32 bits; SINGLE: acc
+  logic signed [31:0] s1_x, s1_m;  // DOUBLE: acc * 2^left saturated to int32; SINGLE: acc
   logic [5:0] s1_sh, s2_sh;  // DOUBLE: right shift 0..31; SINGLE: 31 - shift, 1..62
   logic signed [7:0] s1_zp, s1_lo, s1_hi, s2_zp, s2_lo, s2_hi, s3_zp, s3_lo, s3_hi;
   logic signed [63:0] s2_p;  // DOUBLE: SaturatingRoundingDoublingHighMul (fits 32 bits); SINGLE: acc * mult
@@ -45,7 +53,7 @@ module tfliteRequant #(
     end
   end
 
-  // Stage 1: DOUBLE applies TFLite's int32 x * (1 << left_shift); SINGLE forms the total right shift.
+  // Stage 1: DOUBLE applies TFLite's int32 x * (1 << left_shift), saturated; SINGLE forms the total right shift.
   always_ff @(posedge clk_i)
     if (valid_i) begin
       s1_m  <= mult_i;
@@ -56,7 +64,7 @@ module tfliteRequant #(
         s1_x  <= acc_i;
         s1_sh <= 6'(8'sd31 - shift_i);
       end else if (shift_i > 8'sd0) begin
-        s1_x  <= acc_i <<< shift_i[4:0];
+        s1_x  <= sat_shl(acc_i, shift_i[4:0]);
         s1_sh <= 6'd0;
       end else begin
         s1_x  <= acc_i;
