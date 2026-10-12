@@ -12,12 +12,15 @@ PKG      = $(PRJ_DIR)/../Common/src/sienna_fmt_pkg.sv
 COMMON   = $(PRJ_DIR)/../Common
 FLAGS    = --binary --timing --assert --sv -I$(TB_DIR) --Wno-WIDTHTRUNC --Wno-WIDTHEXPAND --Wno-WIDTHCONCAT --Wno-INITIALDLY -j $(shell nproc) --build-jobs 0 $(EXTRA_FLAGS)
 GEN      = python3 $(TB_DIR)/gen_requant_vectors.py
+V        = $(PRJ_DIR)/Verilator
+# A simulation (1: command, 2: its log) fails the target unless it exits 0, prints RESULT: PASSED and prints no %Error or failed assertion (a simulator may carry on after $error); [f] and [E] keep make's echo of this line from matching, here and in regress.py's firing scan.
+SIM      = set -o pipefail; $(1) | tee $(2) && command grep -q '^RESULT: PASSED' $(2) && ! command grep -qE '^(\[[0-9]+\] )?%[E]rror|Assertion [f]ailed' $(2) || { echo "TB_tfliteRequant: the simulation failed, printed an error or a failed assertion, or printed no RESULT: PASSED ($(2))"; exit 1; }
 
 verilator:
 	$(GEN) $(PRJ_DIR)/Verilator/vec_$(RLOW).txt --rounding $(ROUNDING) --random $(RANDOM)
 	verilator $(FLAGS) -GROUNDING='"$(ROUNDING)"' --top-module TB_tfliteRequant --Mdir $(PRJ_DIR)/Verilator/$(RLOW) \
 	  $(PKG) $(DESIGN) $(TB_DIR)/TB_tfliteRequant.sv -o sim
-	$(PRJ_DIR)/Verilator/$(RLOW)/sim +VEC=$(PRJ_DIR)/Verilator/vec_$(RLOW).txt $(PLUSARGS)
+	$(call SIM,$(V)/$(RLOW)/sim +VEC=$(V)/vec_$(RLOW).txt $(PLUSARGS),$(V)/sim_vec_$(RLOW).log)
 
 both:
 	$(MAKE) verilator ROUNDING=DOUBLE
@@ -27,7 +30,7 @@ vivado_tb:
 	for r in DOUBLE SINGLE; do l=$$(echo $$r | tr A-Z a-z); \
 	  verilator $(FLAGS) -GROUNDING="\"$$r\"" --top-module TB_tfliteRequant --Mdir $(PRJ_DIR)/Verilator/viv_$$l \
 	    $(PKG) $(DESIGN) $(TB_DIR)/TB_tfliteRequant.sv -o sim || exit 1; \
-	  (cd $(TB_DIR) && $(PRJ_DIR)/Verilator/viv_$$l/sim $(PLUSARGS)) || exit 1; done
+	  ($(call SIM,cd $(TB_DIR) && $(V)/viv_$$l/sim $(PLUSARGS),$(V)/sim_viv_$$l.log)) || exit 1; done
 
 vectors:
 	$(GEN) $(TB_DIR)/vectors_double.mem --rounding DOUBLE --random 10000
