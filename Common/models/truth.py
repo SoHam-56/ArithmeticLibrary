@@ -223,12 +223,13 @@ def _exact_result(fmt, func, ok_el, err, at, first):
 
 
 def gate_matmul(fmt, passes, out, bias=None, bound=None) -> Result:
-    """Mesh sums against the float64 sum of the operands it received: |out - t| <= max(bound sum|a b|, 2^-126) per element.
+    """Mesh sums against the true sum of the operands it received, per element.
 
-    A true sum above fp32's max passes only as max or Inf of its sign (gate()'s overflow rule).
-    int8 sums follow the int32 accumulator's contract, as TFLite's int32 accumulation does (Soham, 2026-10-11): the reference is the
-    exact integer sum where it fits int32 and its two's-complement wrap (sum mod 2^32 as signed int32) where it does not; the error
-    is the distance modulo 2^32, and n_ovf counts the sums that wrap.
+    fp32 and bf16 (fp32 sums): |out - t| <= max(bound sum|a b|, 2^-126); a true sum above fp32's max passes only as max or Inf of
+    its sign (gate()'s overflow rule).
+    int8 (int32 sums): exact. Integer arithmetic has one right answer, the int32 accumulator's contract as TFLite's int32
+    accumulation (Soham, 2026-10-11): the exact sum where it fits int32, its two's-complement wrap (sum mod 2^32 as signed int32)
+    where it does not. The error is the distance modulo 2^32; n_ovf counts the sums that wrap.
 
     fmt is the operands' format (passes of (A, B) words); out and bias are accumulator words (fp32, or int32 in int8).
     worst is |out - t| / sum|a b| (unbounded where sum|a b| is 0 and the floor fails), worst_lsb the largest |out - t| in int8."""
@@ -245,7 +246,7 @@ def gate_matmul(fmt, passes, out, bias=None, bound=None) -> Result:
     wraps = ((t > 2**31 - 1) | (t < -2**31)) if fmt == "int8" else np.zeros(t.shape, dtype=bool)  # int32 sums that wrap
     with np.errstate(invalid="ignore", divide="ignore"):
         err = np.abs(np.mod(o - t + 2**31, 2**32) - 2**31) if fmt == "int8" else np.abs(o - t)  # int32: the distance modulo 2^32
-        ok_el = np.where(big, ovf_ok, err <= lim)  # NaN or Inf outputs compare False
+        ok_el = np.where(big, ovf_ok, (err == 0) if fmt == "int8" else (err <= lim))  # NaN or Inf outputs compare False
         e = np.where(s > 0, err / s, np.where(err <= F_FLOOR, 0.0, np.inf))
     e = np.where(big, np.where(ovf_ok, 0.0, np.inf), np.where(np.isfinite(o), e, np.inf)).ravel()
     miss = np.flatnonzero(~ok_el.ravel())
@@ -538,22 +539,29 @@ def selftest() -> int:
     ti = ia @ ib
     i32 = lambda v: np.asarray(v, dtype=np.int64) & 0xFFFFFFFF
     check("matmul int8 exact", gate_matmul("int8", [(ia & 0xFF, ib & 0xFF)], i32(ti)).ok, True)
-    r = gate_matmul("int8", [(ia, ib)], i32(ti + np.array([[300, 0], [0, 0]])))
-    check("matmul int8 300 off (1% of 32512 is 325)", (r.ok, r.worst_lsb), (True, 300))
-    r = gate_matmul("int8", [(ia, ib)], i32(ti + np.array([[400, 0], [0, 0]])))
-    check("matmul int8 400 off", (r.ok, r.over, r.worst_lsb), (False, 1, 400))
+    for off, n in ((1, 1), (-1, 1), (150, 1), (300, 1)):  # exact: one LSB off fails, though 300 is under 1% of sum|ab| = 32512
+        r = gate_matmul("int8", [(ia, ib)], i32(ti + np.array([[off, 0], [0, 0]])))
+        check(f"matmul int8 {off} off fails", (r.ok, r.over, r.worst_lsb), (False, n, abs(off)))
     big = np.array([2**31 - 40000, 0])
     r = gate_matmul("int8", [(ia, ib)], i32(ti + big), bias=i32(big))
     check("matmul int8 bias near int32 max, sums in range", r.ok, True)
     wrap = np.array([2**31 - 1, 0])  # true sums [[2^31, 0], [2^31 - 1, 0]]: the first is past int32 and wraps to -2^31
     one = (np.array([[1, 0], [0, 0]]), np.array([[1, 0], [0, 0]]))
     for what, w00, ok in (("its two's-complement wrap passes", -2**31, True), ("saturated to INT32_MAX fails", 2**31 - 1, False),
-                          ("wrapped one off past 1% fails", -2**31 + 1000, False), ("wrapped as 31 bits fails", 0, False)):
+                          ("wrapped one off fails", -2**31 + 1, False), ("wrapped as 31 bits fails", 0, False)):
         r = gate_matmul("int8", [one], i32(np.array([[w00, 0], [2**31 - 1, 0]])), bias=i32(wrap))
         check(f"matmul int8 sum past int32: {what}", (r.ok, r.over, r.n_ovf), (ok, 0 if ok else 1, 1))
-    r = gate_matmul("int8", [(np.full((2, 2), 127), np.full((2, 2), 127))], i32(np.full((2, 2), -2**31 + 2 * 127 * 127 - 2)),
-                    bias=i32(np.full(2, 2**31 - 2)))
-    check("matmul int8: a wrapped sum within 1% (modulo 2^32) passes", (r.ok, r.worst_lsb), (True, 0))
+    full = (np.full((16, 16), 127), np.full((16, 16), 127))  # sum|ab| = 258064 per element, sums 258064 + bias
+    nb = np.full(16, 2**31 - 100000)  # every true sum is 2^31 + 158064: past INT32_MAX
+    tw = -2**31 + 158064
+    r = gate_matmul("int8", [full], i32(np.full((16, 16), tw)), bias=i32(nb))
+    check("matmul int8, sum|ab| 258064: the wrapped sums pass", (r.ok, r.n_ovf, r.worst_lsb), (True, 256, 0))
+    r = gate_matmul("int8", [full], i32(np.full((16, 16), 2**31 - 1)), bias=i32(nb))
+    check("matmul int8, sum|ab| 258064: a saturating accumulator fails every element", (r.ok, r.over), (False, 256))
+    r = gate_matmul("int8", [full], i32(np.full((16, 16), tw + 1)), bias=i32(nb))
+    check("matmul int8, sum|ab| 258064: wrapped and 1 off fails every element", (r.ok, r.over, r.worst_lsb), (False, 256, 1))
+    r = gate_matmul("int8", [full], i32(np.full((16, 16), tw - 150)), bias=i32(nb))
+    check("matmul int8: wrapped and 150 off (0.06% of sum|ab|) fails", (r.ok, r.over), (False, 256))
     # narrowing: round to nearest even, exactly
     nr = lambda what, pre, post, ok: check(f"narrow {what}", gate_narrow("bf16", [pre], [post]).ok, ok)
     nr("1.0", 0x3F800000, 0x3F80, True)

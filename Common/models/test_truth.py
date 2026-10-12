@@ -47,6 +47,7 @@ MUTANTS = [
     ("SELU alpha 1.67", "SELU_ALPHA = 1.6732632423543772848170429916717", "SELU_ALPHA = 1.67"),
     ("tanh as x", "return np.tanh(np.asarray(x, dtype=np.float64))", "return np.asarray(x, dtype=np.float64)"),
     ("matmul bound 2%", "MM_BOUND = 0.01", "MM_BOUND = 0.02"),
+    ("matmul int8 within 1% of sum|ab|", '(err == 0) if fmt == "int8" else (err <= lim)', "err <= lim"),
     ("matmul int8 sums not wrapped", "np.abs(np.mod(o - t + 2**31, 2**32) - 2**31) if fmt == \"int8\" else np.abs(o - t)", "np.abs(o - t)"),
     ("matmul int8 sums saturated", "np.abs(np.mod(o - t + 2**31, 2**32) - 2**31) if fmt == \"int8\" else np.abs(o - t)",
      "np.abs(o - np.clip(t, -2**31, 2**31 - 1))"),
