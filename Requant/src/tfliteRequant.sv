@@ -107,10 +107,18 @@ module tfliteRequant #(
     end
 
 `ifndef SYNTHESIS
+  logic s1_bad;  // stage 1 took a beat whose shift lies outside [-31, 30]; only valid_i loads it, since a bubble's constants are don't-cares
+  logic signed [7:0] s1_shift;  // that beat's shift, for the message
+  always_ff @(posedge clk_i)
+    if (valid_i) begin
+      s1_bad   <= !((shift_i >= -31) && (shift_i <= 30));
+      s1_shift <= shift_i;
+    end
+  // Checked on the stage-1 registers while s1_v marks a real beat; rstn_i stays since s1_v powers up random before the first reset edge.
   always @(posedge clk_i)
-    if (rstn_i && valid_i)
-      assert ((shift_i >= -31) && (shift_i <= 30))
-      else $error("tfliteRequant: shift %0d outside [-31, 30]", shift_i);
+    if (rstn_i && s1_v)
+      assert (!s1_bad)
+      else $error("tfliteRequant: shift %0d outside [-31, 30]", s1_shift);
 `endif
 
 endmodule
