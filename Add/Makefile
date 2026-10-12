@@ -18,8 +18,8 @@ FLAGS    = --binary --timing --assert --sv -I$(TB_DIR) --Wno-WIDTHTRUNC --Wno-WI
 GEN      = $(PYTHON) $(TB_DIR)/gen_add_vectors.py
 CHECK    = $(PYTHON) $(TB_DIR)/check_add.py
 BUILD    = verilator $(FLAGS) -GROUNDING='"$(ROUNDING)"' --top-module TB_tfliteAdd --Mdir $(V)/$(RLOW) $(PKG) $(DESIGN) $(TB_DIR)/TB_tfliteAdd.sv -o sim
-# A simulation (1: command, 2: its log) fails the target unless it exits 0, prints RESULT: PASSED and prints no %Error or failed assertion (a simulator may carry on after $error); [f] keeps make's echo of this line from matching.
-SIM      = set -o pipefail; $(1) | tee $(2) && command grep -q '^RESULT: PASSED' $(2) && ! command grep -qE '^(\[[0-9]+\] )?%Error|Assertion [f]ailed' $(2) || { echo "TB_tfliteAdd: the simulation failed, printed an error or a failed assertion, or printed no RESULT: PASSED ($(2))"; exit 1; }
+# A simulation (1: command, 2: its log) fails the target unless it exits 0, prints RESULT: PASSED and prints no %Error or failed assertion (a simulator may carry on after $error); [f] and [E] keep make's echo of this line from matching, here and in regress.py's firing scan.
+SIM      = set -o pipefail; $(1) | tee $(2) && command grep -q '^RESULT: PASSED' $(2) && ! command grep -qE '^(\[[0-9]+\] )?%[E]rror|Assertion [f]ailed' $(2) || { echo "TB_tfliteAdd: the simulation failed, printed an error or a failed assertion, or printed no RESULT: PASSED ($(2))"; exit 1; }
 
 verilator:
 	$(GEN) $(V)/vec_$(RLOW).txt --rounding $(ROUNDING) --random $(RANDOM)

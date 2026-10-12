@@ -254,6 +254,22 @@ def test_point_drops_unit_variables():
 
 
 @selftest
+def test_make_echo_does_not_fire_the_scan():
+    """No point of a unit with a SIM gate prints a command line that regress.py's firing scan (Assertion failed, %Error) matches: the gate spells them [f] and [E]. (make -n also lists @-silenced lines, so units without a gate are left out.)"""
+    bad = []
+    for name in SPEC.points(False, [])[1:]:
+        u, t = TABLE[name][:2]
+        if not re.search(r"(?m)^SIM\s*=", open(os.path.join(ROOT, u, "Makefile")).read()):
+            continue
+        t = "verilator" if u == "Multipliers/FPWiden" else t
+        r = subprocess.run(["make", "-n", "-C", os.path.join(ROOT, u), t], capture_output=True, text=True, env={k: v for k, v in os.environ.items() if not k.startswith("MAKE")})
+        m = regress.FIRING.search(r.stdout)
+        if m and TABLE[name][4]:  # lint_bad shows its own %Error: its point does not scan
+            bad.append((name, m.group(0).strip()[:60]))
+    assert not bad, bad
+
+
+@selftest
 def test_point_runs_in_a_copy():
     with tempfile.TemporaryDirectory() as d:
         src, res = os.path.join(d, "tree"), os.path.join(d, "res")
