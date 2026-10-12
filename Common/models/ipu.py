@@ -59,13 +59,13 @@ def rdbpot(x, exp):
 
 
 def mbqm(acc, mult, shift, rounding):
-    """TFLite MultiplyByQuantizedMultiplier in either rounding; shift in [-31, 30], positive shifts left."""
+    """TFLite MultiplyByQuantizedMultiplier in either rounding; shift in [-31, 30], positive shifts left (DOUBLE: saturated to int32, where TFLite's overflows)."""
     acc, mult = sx(acc, 32), sx(mult, 32)
     shift = np.asarray(shift, dtype=np.int64)
     assert np.all((shift >= -31) & (shift <= 30)), "shift outside [-31, 30]"
     if rounding == "DOUBLE":
         left, right = np.maximum(shift, 0), np.maximum(-shift, 0)
-        return rdbpot(srdhm(sx(acc << left, 32), mult), right)
+        return rdbpot(srdhm(np.clip(acc << left, INT32_MIN, INT32_MAX), mult), right)  # tfliteRequant saturates TFLite's overflowing left shift
     if rounding == "SINGLE":
         total = 31 - shift
         return sx((acc * mult + (np.int64(1) << (total - 1))) >> total, 32)

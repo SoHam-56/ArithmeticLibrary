@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Writes tfliteRequant vectors from ipu.requant in hex (acc mult shift zp act_min act_max expected): corners, discriminators, random."""
+"""Writes tfliteRequant vectors from ipu.requant in hex (acc mult shift zp act_min act_max expected): corners, discriminators, random; DOUBLE expects the saturated left shift."""
 import argparse
 import itertools
 import os
@@ -75,9 +75,11 @@ def main() -> None:
     table = np.stack([ipu.bits(v, w) for v, w in zip(cols + [want], [32, 32, 8, 8, 8, 8, 8])], axis=1)
     np.savetxt(a.out, table, fmt="%08x %08x %02x %02x %02x %02x %02x")
     at_bound = float(np.mean((want == cols[4]) | (want == cols[5])))
+    ovf = int(np.sum((cols[2] > 0) & ((cols[0] << np.maximum(cols[2], 0)) != ipu.sx(cols[0] << np.maximum(cols[2], 0), 32))))
     print(f"{a.out}: {len(table)} vectors ({len(c[0])} corners, {len(d[0])} rounding discriminators, {a.random} random), "
           f"rounding {a.rounding}, {int(np.sum(want != other))} differ from the other rounding, "
-          f"{100 * at_bound:.1f}% at a clamp bound")
+          f"{100 * at_bound:.1f}% at a clamp bound, {ovf} with acc << shift outside int32 (DOUBLE saturates there, TFLite's wraps; "
+          f"the rest is TFLite's defined range)")
 
 
 if __name__ == "__main__":

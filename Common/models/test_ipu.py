@@ -70,7 +70,9 @@ MBQM = [  # acc, mult, shift, DOUBLE, SINGLE
     (MAX, MAX, 0, MAX - 1, MAX - 1),
     (100, H, 8, 12800, 12800),  # 100 * 2^8 * 0.5
     (-(1 << 23), H, 8, -H, -H),  # acc << 8 is exactly INT32_MIN
-    (1 << 24, H, 8, 0, MIN),  # outside TFLite's range: DOUBLE's int32 acc << 8 wraps to 0, SINGLE's 2^31 wraps to INT32_MIN
+    (1 << 24, H, 8, 1 << 30, MIN),  # outside TFLite's range: DOUBLE's acc << 8 saturates to INT32_MAX (TFLite's wraps to 0), SINGLE's 2^31 wraps to INT32_MIN
+    (-(1 << 24) - 1, H, 8, -(1 << 30), MAX - 127),  # DOUBLE saturates to INT32_MIN (TFLite's wraps to -256); SINGLE's -2^31 - 128 wraps
+    (1 << 23, MAX, 8, MAX - 1, MAX),  # acc << 8 = 2^31: DOUBLE saturates to INT32_MAX (TFLite's wraps to INT32_MIN); SINGLE fits
     (1, H, 30, 1 << 29, 1 << 29),  # the largest shift
     (1 << 30, H, -30, 1, 1),  # +0.5: away (DOUBLE) and up (SINGLE) agree
     (1 << 30, H, -31, 0, 0),  # 0.25
@@ -87,7 +89,7 @@ REQUANT = [  # acc, mult, shift, zp, act_min, act_max, DOUBLE, SINGLE
     (-6, H, -1, 0, -128, 127, -2, -1),
     (5, H, -1, 0, -128, 127, 2, 1),
     (0, H, 0, 0, 5, -5, -5, -5),  # act_min > act_max: max then min gives act_max
-    (1 << 24, H, 8, 0, -128, 127, 0, -128),
+    (1 << 24, H, 8, 0, -128, 127, 127, -128),  # DOUBLE saturates the left shift (TFLite's wraps to 0); SINGLE wraps
     (0x80, H, 0, 0x80, 0x80, 0x7F, -64, -64),  # 8-bit patterns: zp and act_min read as -128; 64 - 128
 ]
 INT_MUL = [(-128, -128, 16384), (-128, 127, -16256), (127, 127, 16129), (0x80, 0x80, 16384), (0xFF, 1, -1), (0, -128, 0)]
@@ -165,15 +167,16 @@ def c_rdbpot(x, e):  # fixedpoint.h RoundingDivideByPOT
     return (x >> e) + (1 if (x & mask) > (mask >> 1) + (1 if x < 0 else 0) else 0)
 
 
-def c_mbqm(x, m, s, rounding):  # common.cc, both builds
+def c_mbqm(x, m, s, rounding, sat=False):  # common.cc, both builds; sat: tfliteRequant's saturating left shift in place of the int32 wrap
     if rounding == "DOUBLE":
-        return c_rdbpot(c_srdhm(wrap32(x * (1 << max(s, 0))), m), max(-s, 0))
+        xs = x * (1 << max(s, 0))
+        return c_rdbpot(c_srdhm(max(MIN, min(MAX, xs)) if sat else wrap32(xs), m), max(-s, 0))
     t = 31 - s
     return wrap32((x * m + (1 << (t - 1))) >> t)
 
 
-def c_requant(x, m, s, zp, lo, hi, rounding):
-    return min(max(wrap32(c_mbqm(x, m, s, rounding) + zp), lo), hi)
+def c_requant(x, m, s, zp, lo, hi, rounding, sat=False):
+    return min(max(wrap32(c_mbqm(x, m, s, rounding, sat) + zp), lo), hi)
 
 
 def c_add(q1, q2, zp1, zp2, m1, s1, m2, s2, mo, so, zpo, lo, hi, rounding, ls=20):  # reference integer_ops/add.h AddFunc, line for line; ls is params.left_shift
@@ -240,10 +243,20 @@ def main() -> None:
           [c_srdhm(a, b) for a, b in zip(A, B)], [MAX if a == b == MIN else (a * b + H) >> 31 for a, b in zip(A, B)])
     check("rdbpot random", ipu.rdbpot(na, ne), [c_rdbpot(x, e) for x, e in zip(A, E)])
     check("rdbpot = nearest, ties away", [c_rdbpot(x, e) for x, e in zip(A, E)], [half_away(x, 1 << e) for x, e in zip(A, E)])
+    # Where TFLite's int32 left shift is defined, ipu is TFLite's common.cc bit for bit; where it overflows, DOUBLE saturates instead of wrapping.
+    ovf = np.array([not MIN <= x * (1 << max(s, 0)) <= MAX for x, s in zip(A, S)])
+    check("random draws overflow DOUBLE's left shift, and others do not", (int(ovf.sum()) > 1000, int((~ovf).sum()) > 1000), (True, True))
     for r in ipu.ROUNDINGS:
-        check(f"mbqm random {r}", ipu.mbqm(na, nb, ns, r), [c_mbqm(x, m, s, r) for x, m, s in zip(A, B, S)])
-        check(f"requant random {r}", ipu.requant(na, nb, ns, nz, nlo, nhi, r),
-              [c_requant(*t, r) for t in zip(A, B, S, Z, LO, HI)])
+        tfl = np.array([c_mbqm(x, m, s, r) for x, m, s in zip(A, B, S)])
+        check(f"mbqm random {r}, TFLite's defined range: TFLite's", ipu.mbqm(na, nb, ns, r)[~ovf], tfl[~ovf])
+        check(f"mbqm random {r}, overflowing left shift: {'saturated' if r == 'DOUBLE' else 'TFLite'}", ipu.mbqm(na, nb, ns, r)[ovf],
+              np.array([c_mbqm(x, m, s, r, sat=True) for x, m, s in zip(A, B, S)])[ovf])
+        tflr = np.array([c_requant(*t, r) for t in zip(A, B, S, Z, LO, HI)])
+        check(f"requant random {r}, TFLite's defined range: TFLite's", ipu.requant(na, nb, ns, nz, nlo, nhi, r)[~ovf], tflr[~ovf])
+        check(f"requant random {r}, overflowing left shift", ipu.requant(na, nb, ns, nz, nlo, nhi, r)[ovf],
+              np.array([c_requant(*t, r, sat=True) for t in zip(A, B, S, Z, LO, HI)])[ovf])
+    sat_d, tfl_d = ipu.mbqm(na[ovf], nb[ovf], ns[ovf], "DOUBLE"), np.array([c_mbqm(x, m, s, "DOUBLE") for x, m, s in zip(A, B, S)])[ovf]
+    check("DOUBLE's saturation differs from TFLite's wrap on most overflowing draws", int(np.sum(sat_d != tfl_d)) > int(ovf.sum()) // 2, True)
     # Against exact arithmetic where TFLite defines the result: SINGLE within 1/2, DOUBLE within 1.
     bad = {"DOUBLE": 0, "SINGLE": 0}
     for x, m, s in zip(A, B, S):
