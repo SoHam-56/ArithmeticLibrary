@@ -2,6 +2,7 @@
 """ArithmeticLibrary's make regression: every unit bench and model check once (the benches fix their own formats), then one table."""
 
 import contextlib
+import glob
 import io
 import json
 import os
@@ -38,11 +39,14 @@ POINTS = [  # (unit, target, need, bad, firing scan)
     ("Multipliers/Fx", "vivado_tb", TB, TB_BAD, True), ("Multipliers/Fx", "lint", (), LINT_BAD, True),
     ("Requant", "both", TB, TB_BAD, True), ("Requant", "vivado_tb", TB, TB_BAD, True), ("Requant", "lint", (), LINT_BAD, True),
     ("Requant", "lint_bad", (r"^REJECTED$",), (r"^NOT-REJECTED$",), False),  # its log shows the %Error it provokes
+    ("Add", "both", TB, TB_BAD, True), ("Add", "vivado_tb", TB, TB_BAD, True), ("Add", "lint", (), LINT_BAD, True),
+    ("Add", "lint_bad", (r"^REJECTED$",), (r"^NOT-REJECTED$",), False),  # its log shows the %Error it provokes
+    ("Add", "selftest", (r"^check_add selftest: 0 failures$", r"^add_oracle selftest: 0 failures$"), TB_BAD, True),  # a passing self-test prints no %Error: one that does fails
     ("Converters/FPNarrow", "all", TB + (r"^bad_format OK:", r"^fpNarrow lint \(MAN_W 7, 23\): 0 warnings, 0 errors$"), TB_BAD, True),
 ]
 CREDIT_OK = 11  # TB_credit_link: 8 (STAGES, MODE) runs and 3 $fatal modes, one 'credit OK' line each
 LINT_RUNS = {"Adders/FP/lint": 2, "Adders/Int/lint": 1, "Multipliers/FP/lint": 2, "Multipliers/Int/lint": 2, "Multipliers/Fx/lint": 1,
-             "Requant/lint": 2}  # Common/lint.sh lines each lint prints, one per configuration
+             "Requant/lint": 2, "Add/lint": 2}  # Common/lint.sh lines each lint prints, one per configuration
 TABLE = {f"{u}/{t}": (u, t, need, bad, firing) for u, t, need, bad, firing in POINTS}
 
 
@@ -180,6 +184,11 @@ def test_verdict_rules():
     tr = "truth selftest: 126 checks, 0 failures\nRESULT: PASSED\ntest_truth: 97 checks, 0 failures\nRESULT: PASSED\n"
     assert SPEC.verdict("Common/truth", tr, 0) == "PASS" and SPEC.verdict("Common/truth", tr.split("test_truth")[1], 0).startswith("FAIL (no 'truth selftest")  # the selftest must have run
     assert SPEC.verdict("Common/truth", tr.replace("PASSED\ntest", "FAILED\ntest"), 0).startswith("FAIL (log: RESULT: FAILED")
+    sa = "check_add selftest: 0 failures\nRESULT: PASSED\nadd_oracle selftest: 0 failures\nRESULT: PASSED\n"
+    assert SPEC.verdict("Add/selftest", sa, 0) == "PASS"
+    assert SPEC.verdict("Add/selftest", "check_add selftest: 0 failures\nRESULT: PASSED\nadd_oracle selftest: 1 failures\nRESULT: FAILED\n", 0).startswith("FAIL")
+    assert SPEC.verdict("Add/selftest", sa.split("add_oracle")[0] + "RESULT: PASSED\n", 0).startswith("FAIL (no 'add_oracle")  # one checker's self-test alone is not the point
+    assert SPEC.verdict("Add/selftest", "check_add selftest: 2 failures\nRESULT: FAILED\nadd_oracle selftest: 0 failures\nRESULT: PASSED\n", 0).startswith("FAIL")  # the first checker failing is not hidden by the second passing
     assert SPEC.verdict("selftest", "ALL 9 PASSED\n", 0) == "PASS" and SPEC.verdict("selftest", "1 of 9 FAILED\n", 0).startswith("FAIL")
     two = "lint fpAdder EXP_W=8 MAN_W=7: 3 warnings, 0 errors\nlint fpAdder EXP_W=8 MAN_W=23: 2 warnings, 0 errors\n"
     assert SPEC.verdict("Adders/FP/lint", two, 0) == "PASS" and SPEC.verdict("Adders/FP/lint", "", 0) == "FAIL (0 of 2 lint runs counted)"  # a clean exit is not a lint
@@ -217,6 +226,16 @@ def test_points_and_commands():
         pass
     else:
         raise AssertionError("parse accepted Adders/FP/nosuch")
+
+
+@selftest
+def test_every_unit_has_points():
+    """Every unit directory with a Makefile appears in POINTS, so a new unit cannot be left out of make regression."""
+    mk = glob.glob(os.path.join(ROOT, "*", "Makefile")) + glob.glob(os.path.join(ROOT, "*", "*", "Makefile"))
+    units = sorted(os.path.relpath(os.path.dirname(p), ROOT) for p in mk)
+    listed = {u for u, *_ in POINTS}
+    missing = [u for u in units if u not in listed]
+    assert len(units) >= 13 and not missing, f"units without a make regression point: {missing}"
 
 
 @selftest
