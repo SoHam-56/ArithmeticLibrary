@@ -65,6 +65,8 @@ MUTANTS = [
     ("requant truncates", "np.right_shift(prod + np.left_shift(np.int64(1), d - 1), d)", "np.right_shift(prod, d)"),
     ("requant zero point left out", "return np.clip(q + zp, amin, amax), real", "return np.clip(q, amin, amax), real"),
     ("requant within 2 LSB", "miss = np.flatnonzero(lsb > I8_FLOOR)", "miss = np.flatnonzero(lsb > I8_FLOOR + 1)"),
+    ("multiplier within one LSB", "ok_el = (dev <= 0.5 + 1e-6)", "ok_el = (dev <= 1.5)"),
+    ("multiplier normalization unchecked", "& (mult >= 2**30) & (mult < 2**31)", ""),
     ("maxpool first element", "xp[i * ph:i * ph + ph, j * pw:j * pw + pw].max()", "xp[i * ph:i * ph + ph, j * pw:j * pw + pw].ravel()[0]"),
     ("maxpool pad 0", "fill = -128.0 if fmt == \"int8\" else -np.inf", "fill = 0.0"),
     ("dropout unscaled", "kept = values(fmt, encode(fmt, xv / (1.0 - p)))", "kept = xv"),
@@ -170,6 +172,9 @@ def main():
     tfl = np.asarray(ipu.requant(acc, mult, shift, zp, lo, hi, "DOUBLE"), dtype=np.int64)
     check("TFLite's requantize within 1 LSB of requant_ref, 20000 draws", int(np.abs(tfl - qt).max()) <= 1, True)
     check("gate_requant passes TFLite's words", truth.gate_requant(acc, mult, shift, zp, lo, hi, tfl).ok, True)
+    reals = np.exp(rng.uniform(np.log(1e-6), np.log(0.99), 5000))
+    qm = [ipu.quantize_multiplier(float(r)) for r in reals]
+    check("gate_multiplier passes ipu.quantize_multiplier's words, 5000 ratios", truth.gate_multiplier([m for m, _ in qm], [e for _, e in qm], reals).ok, True)
     w = np.concatenate([rng.integers(0, 1 << 32, 20000), [0x7F7F8000, 0xFF7F8000, 0x7F7F7FFF, 0x3F808000, 0x3F818000]])
     w = w[((w >> 23) & 0xFF) != 0]  # fpNarrow flushes subnormal inputs as narrow_ref does; compared on normals, NaN and Inf
     want = np.asarray(fpu.narrow(fpu.FORMATS["bf16"], w), dtype=np.int64)

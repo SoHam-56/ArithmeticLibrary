@@ -182,7 +182,7 @@ def line(r: Result, bound=None, target=None) -> str:
 # ── per-stage gates (mesh and pipeline): each stage against the true function of its own actual inputs ──
 
 MM_BOUND = 0.01  # matmul and accumulate: |err| <= max(1% of sum|a b|, 2^-126) per element (Soham, 2026-10-11)
-STAGES = ("matmul", "narrow", "requant", "activation", "maxpool", "dropout")
+STAGES = ("matmul", "narrow", "requant", "multiplier", "activation", "maxpool", "dropout")
 
 
 def values(fmt, w):
@@ -309,6 +309,21 @@ def gate_requant(acc, mult, shift, zp, amin, amax, q) -> Result:
                   int(miss.size), int(lsb.max()), 0, 0, [(int(k), int(a[k]), int(q.ravel()[k]), int(qt.ravel()[k])) for k in miss[:FIRST]])
 
 
+def gate_multiplier(mult, shift, real) -> Result:
+    """The host's requantize multipliers against the real scale ratios they encode (s_a s_w / s_out): mult 2^(shift - 31) must be
+    within half the multiplier's own LSB, 2^(shift - 32), of real, as TFLite's QuantizeMultiplier rounds; mult in [2^30, 2^31).
+
+    worst is the largest |mult 2^(shift - 31) - real| in the multiplier's LSBs (pass: <= 0.5)."""
+    mult, shift, real = np.broadcast_arrays(np.asarray(mult, dtype=np.int64), np.asarray(shift, dtype=np.int64),
+                                            np.asarray(real, dtype=np.float64))
+    lsb = np.ldexp(1.0, shift - 31)
+    dev = np.abs(mult * lsb - real) / lsb  # exact enough: mult < 2^31 and the products are float64
+    ok_el = (dev <= 0.5 + 1e-6) & (mult >= 2**30) & (mult < 2**31) & (real > 0)
+    return _exact_result("int8", "multiplier", ok_el.ravel(), dev.ravel(), real.ravel(),
+                         lambda k: (int(k), int(mult.ravel()[k]), int(shift.ravel()[k]), float(real.ravel()[k])))._replace(
+        worst=float(dev.max()) if dev.size else 0.0)
+
+
 def maxpool_ref(x, ph, pw, pad, fill):
     """Max of every ph x pw window, stride the window, the input padded by pad with fill on each side."""
     x = np.asarray(x, dtype=np.float64)
@@ -363,6 +378,9 @@ def stage_line(r: Result) -> str:
     elif r.func == "narrow":
         w = f"worst {r.worst_lsb} ULP"
         rule = f"not round-to-nearest-even: {r.over}"
+    elif r.func == "multiplier":
+        w = f"worst {r.worst:.3f} LSB of the multiplier from s_a s_w / s_out"
+        rule = f"over 0.5 LSB: {r.over}"
     else:
         w = f"worst |out - want| {r.worst:.6g}"
         rule = f"not exact: {r.over}"
@@ -599,6 +617,18 @@ def selftest() -> int:
     rq("8-bit word 0xCE (-50)", -100, 0xCE, True)
     check("requant_ref exact near 2^62", [int(requant_ref(-2**31, 2**31 - 1, s, 0, -2**40, 2**40)[0]) for s in (0, -31)], [-(2**31 - 1), -1])
     check("requant worst LSBs", gate_requant([100, 100], m1, 0, 0, -128, 127, [50, 53]).worst_lsb, 3)
+    # the requantize multipliers: mult 2^(shift - 31) within half a multiplier LSB of the real ratio
+    import math
+    def qm(r):  # TFLite QuantizeMultiplier, here to make the cases
+        q, e = math.frexp(r)
+        m = int(round(q * 2**31))
+        return (m // 2, e + 1) if m == 2**31 else (m, e)
+    reals = np.array([0.000123, 0.0071, 0.5, 0.999999999, 1.7e-5])
+    ms, es = zip(*(qm(float(r)) for r in reals))
+    check("multiplier: QuantizeMultiplier's words pass", gate_multiplier(ms, es, reals).ok, True)
+    check("multiplier: one LSB high fails", gate_multiplier(np.array(ms) + 1, es, reals).over, 5)
+    check("multiplier: shift one low fails", gate_multiplier(ms, np.array(es) - 1, reals).over, 5)
+    check("multiplier: an unnormalized mult fails", gate_multiplier([ms[2] // 2], [es[2] + 1], [reals[2]]).ok, False)
     # max pooling: the max of each window of the actual inputs, padded with -Inf (int8: -128)
     x = np.arange(16.0).reshape(4, 4) - 8.0
     xw = encode("fp32", x)
