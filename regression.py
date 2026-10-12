@@ -53,6 +53,7 @@ TABLE = {f"{u}/{t}": (u, t, need, bad, firing) for u, t, need, bad, firing in PO
 class ArilSpec(regress.Spec):
     title = "ARITHMETICLIBRARY REGRESSION"
     artifacts = ()  # each bench's dumps stay in its Verilator directory
+    drop = ("ROUNDING", "RANDOM", "ORACLE")  # Add's Makefile takes these with ?=: a caller's would change a point's vectors
 
     def points(self, small, formats):
         return ["selftest"] + list(TABLE)
@@ -236,6 +237,20 @@ def test_every_unit_has_points():
     listed = {u for u, *_ in POINTS}
     missing = [u for u in units if u not in listed]
     assert len(units) >= 13 and not missing, f"units without a make regression point: {missing}"
+
+
+@selftest
+def test_point_drops_unit_variables():
+    """A point never sees the caller's ROUNDING, RANDOM or ORACLE, which Add's Makefile takes with ?=."""
+    names = ("ROUNDING", "RANDOM", "ORACLE")
+    saved = {k: os.environ.get(k) for k in names}
+    os.environ.update(ROUNDING="SINGLE", RANDOM="10", ORACLE="/x")
+    try:
+        env = regress.point_env(SPEC, "Add/both", "s", 8)
+    finally:
+        for k, v in saved.items():
+            os.environ.pop(k) if v is None else os.environ.__setitem__(k, v)
+    assert not set(names) & set(env), sorted(set(names) & set(env))
 
 
 @selftest
