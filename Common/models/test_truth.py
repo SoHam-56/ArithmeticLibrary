@@ -71,6 +71,10 @@ MUTANTS = [
     ("maxpool pad 0", "fill = -128.0 if fmt == \"int8\" else -np.inf", "fill = 0.0"),
     ("dropout unscaled", "kept = values(fmt, encode(fmt, xv / (1.0 - p)))", "kept = xv"),
     ("dropout mask ignored", "want = np.where(keep, kept, dropped) if training else xv", "want = kept if training else xv"),
+    ("add ties toward zero", "(mask >> 1) + int(x < 0))", "(mask >> 1))"),
+    ("add zp1 dropped", '(int(a) - w["zp1"]) << 20', 'int(a) << 20'),
+    ("add clamp ignored", 'min(w["amax"], max(w["amin"], _mbqm1(x, w["mo"], w["so"], rounding) + w["zpo"]))',
+     'min(127, max(-128, _mbqm1(x, w["mo"], w["so"], rounding) + w["zpo"]))'),
 ]
 
 
@@ -194,6 +198,27 @@ def main():
         xp = np.pad(x, pad, constant_values=-np.inf)
         bf = [[max(xp[i * ph + a, j * pw + b] for a in range(ph) for b in range(pw)) for j in range(ref.shape[1])] for i in range(ref.shape[0])]
         check(f"maxpool_ref {ph}x{pw} pad {pad} against brute force", ref.tolist(), bf)
+    # the int8 ADD: add_ref against ipu.tflite_add (two independent implementations) in both roundings, and gate_add failing one code off
+    add_bad = {"DOUBLE": 0, "SINGLE": 0}
+    for i in range(100):
+        s1, s2, so = np.exp2(rng.uniform(-10, 2, 3))
+        zp1, zp2, zpo = (int(z) for z in rng.integers(-128, 128, 3))
+        clamp = ("NONE", "RELU", "RELU6")[i % 3]
+        lo, hi = (-128, 127) if clamp == "NONE" else (zpo, 127) if clamp == "RELU" else (zpo, int(min(127, zpo + round(6.0 / so))))
+        w = dict(zp1=zp1, zp2=zp2, zpo=zpo, amin=lo, amax=hi, **ipu.add_params(s1, s2, so))
+        q1, q2 = rng.integers(-128, 128, 256), rng.integers(-128, 128, 256)
+        for rd in add_bad:
+            want = np.asarray(ipu.tflite_add(q1, q2, *[w[f] for f in ("zp1", "zp2", "m1", "s1", "m2", "s2", "mo", "so", "zpo", "amin", "amax")], rd),
+                              dtype=np.int64)
+            add_bad[rd] += int((truth.add_ref(q1, q2, w, rd) != want).sum())
+            if i == 0:
+                check(f"gate_add passes ipu.tflite_add's codes ({rd})", truth.gate_add(q1, q2, w, want, rd).ok, True)
+                off = want.copy()
+                off[17] += 1 if off[17] < hi else -1
+                r = truth.gate_add(q1, q2, w, off & 0xFF, rd)
+                check(f"gate_add fails one code off by one ({rd})", (r.ok, r.over, r.first[0][0]), (False, 1, 17))
+    for rd, n in add_bad.items():
+        check(f"add_ref against ipu.tflite_add, 100 word sets x 256 pairs ({rd})", n, 0)
 
     # the selftest passes, and fails on each mutant
     with contextlib.redirect_stdout(io.StringIO()):

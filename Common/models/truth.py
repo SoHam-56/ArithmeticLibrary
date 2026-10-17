@@ -324,6 +324,47 @@ def gate_multiplier(mult, shift, real) -> Result:
         worst=float(dev.max()) if dev.size else 0.0)
 
 
+def _srdhm(a: int, b: int) -> int:
+    """TFLite's SaturatingRoundingDoublingHighMul: (a b + nudge) / 2^31 truncated toward zero; INT32_MIN squared saturates."""
+    if a == b == -2**31:
+        return 2**31 - 1
+    v = a * b + (2**30 if a * b >= 0 else 1 - 2**30)
+    return v // 2**31 if v >= 0 else -((-v) // 2**31)
+
+
+def _rdbpot(x: int, e: int) -> int:
+    """TFLite's RoundingDivideByPOT: x / 2^e, ties away from zero."""
+    mask = (1 << e) - 1
+    return (x >> e) + int((x & mask) > (mask >> 1) + int(x < 0))
+
+
+def _mbqm1(x: int, m: int, s: int, rounding: str) -> int:
+    """TFLite's MultiplyByQuantizedMultiplierSmallerThanOneExp (s <= 0) in DOUBLE, or MultiplyByQuantizedMultiplier under TFLITE_SINGLE_ROUNDING."""
+    if rounding == "DOUBLE":
+        return _rdbpot(_srdhm(x, m), -s)
+    n = 31 - s
+    return (x * m + (1 << (n - 1))) >> n
+
+
+def add_ref(q1, q2, w: dict, rounding: str = "DOUBLE") -> np.ndarray:
+    """TFLite's int8 ADD (reference_integer_ops::Add, left shift 20) on Python integers, from the layer's words w (zp1 .. amax)."""
+    if rounding not in ("DOUBLE", "SINGLE"):
+        raise ValueError(f"add_ref: rounding must be DOUBLE or SINGLE, not {rounding!r}")
+    def one(a, b):
+        x = _mbqm1((int(a) - w["zp1"]) << 20, w["m1"], w["s1"], rounding) + _mbqm1((int(b) - w["zp2"]) << 20, w["m2"], w["s2"], rounding)
+        return min(w["amax"], max(w["amin"], _mbqm1(x, w["mo"], w["so"], rounding) + w["zpo"]))
+    return np.vectorize(one, otypes=[np.int64])(int8_codes(q1), int8_codes(q2))
+
+
+def gate_add(q1, q2, w: dict, out, rounding: str = "DOUBLE") -> Result:
+    """The int8 ADD stage: bit-exact against TFLite's reference kernel (add_ref), not a float64 true function: spec Decision 1, the one exception to the true-function gates."""
+    want = add_ref(q1, q2, w, rounding)
+    got = int8_codes(out).reshape(want.shape)
+    a1, a2, g, x = int8_codes(q1).ravel(), int8_codes(q2).ravel(), got.ravel(), want.ravel()
+    return _exact_result("int8", "add", g == x, np.abs(g - x).astype(float), x.astype(float),
+                         lambda k: (int(k), int(a1[k]), int(a2[k]), int(g[k]), int(x[k])))
+
+
 def maxpool_ref(x, ph, pw, pad, fill):
     """Max of every ph x pw window, stride the window, the input padded by pad with fill on each side."""
     x = np.asarray(x, dtype=np.float64)
@@ -617,6 +658,15 @@ def selftest() -> int:
     rq("8-bit word 0xCE (-50)", -100, 0xCE, True)
     check("requant_ref exact near 2^62", [int(requant_ref(-2**31, 2**31 - 1, s, 0, -2**40, 2**40)[0]) for s in (0, -31)], [-(2**31 - 1), -1])
     check("requant worst LSBs", gate_requant([100, 100], m1, 0, 0, -128, 127, [50, 53]).worst_lsb, 3)
+    # the int8 ADD, bit-exact: (q1 + q2) / 4 with every multiplier 0.5, zero points 0 and 3, a ReLU clamp at zp_o
+    aw = dict(zp1=0, zp2=0, m1=m1, s1=0, m2=m1, s2=0, mo=m1, so=-20, zpo=0, amin=-128, amax=127)
+    check("add (10 + 10) / 4", add_ref([10], [10], aw).tolist(), [5])
+    check("add -6 / 4 ties away from zero", add_ref([-3], [-3], aw).tolist(), [-2])
+    check("add exact", gate_add([10, -3, 100], [10, -3, 100], aw, [5, -2, 50]).ok, True)
+    check("add one code off", gate_add([10, -3, 100], [10, -3, 100], aw, [5, -1, 50]).over, 1)
+    check("add zero points", add_ref([13], [10], dict(aw, zp1=3, zpo=3)).tolist(), [8])
+    check("add ReLU clamp at zp_o", add_ref([-100], [-100], dict(aw, zpo=3, amin=3)).tolist(), [3])
+    check("add 8-bit words", gate_add([0xF6], [0xF6], aw, [0xFB]).ok, True)
     # the requantize multipliers: mult 2^(shift - 31) within half a multiplier LSB of the real ratio
     import math
     def qm(r):  # TFLite QuantizeMultiplier, here to make the cases
