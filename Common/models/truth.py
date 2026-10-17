@@ -365,6 +365,72 @@ def gate_add(q1, q2, w: dict, out, rounding: str = "DOUBLE") -> Result:
                          lambda k: (int(k), int(a1[k]), int(a2[k]), int(g[k]), int(x[k])))
 
 
+# ── affine int8 requantize and ADD on the true function (decimal rule: |hw - t| <= max(1% |t|, s_out), t clamped to the output range) ──
+
+I8_REL = TARGET  # int8's relative tolerance; the floor is one output step
+
+
+def requant_true(acc, s, zp, lo, hi):
+    """The true requantized value in output codes: acc s + zp clamped to [lo, hi], float64 (acc int32, s the real scale > 0)."""
+    acc = (((np.asarray(acc, dtype=np.int64) & 0xFFFFFFFF) + 2**31) & 0xFFFFFFFF) - 2**31
+    return np.clip(acc * np.asarray(s, dtype=np.float64) + int8_codes(zp), int8_codes(lo), int8_codes(hi))
+
+
+def add_true(q1, q2, s1, z1, s2, z2, s_out, zo, lo, hi):
+    """The true ADD in output codes: (s1 (q1 - z1) + s2 (q2 - z2)) / s_out + zo clamped to [lo, hi], float64."""
+    v = (np.asarray(s1, dtype=np.float64) * (int8_codes(q1) - int8_codes(z1)) +
+         np.asarray(s2, dtype=np.float64) * (int8_codes(q2) - int8_codes(z2))) / np.asarray(s_out, dtype=np.float64)
+    return np.clip(v + int8_codes(zo), int8_codes(lo), int8_codes(hi))
+
+
+def _code_gate(func, tc, zp, q, at, first):
+    """Codes q against true codes tc under the decimal rule in code units, |q - tc| <= max(I8_REL |tc - zp|, 1); no row fails (no vacuous pass)."""
+    tc = np.asarray(tc, dtype=np.float64).ravel()
+    q = int8_codes(q).astype(np.float64)
+    q = np.broadcast_to(q, tc.shape).ravel() if q.size == 1 else q.ravel()
+    zp = np.broadcast_to(int8_codes(zp), tc.shape).ravel()
+    if q.shape != tc.shape:
+        raise ValueError(f"{func}: {q.size} outputs for {tc.size} true values")
+    dev = np.abs(q - tc)
+    tol = np.maximum(I8_REL * np.abs(tc - zp), 1.0)
+    miss = np.flatnonzero(dev > tol)
+    i = int(np.argmax(dev)) if dev.size else 0
+    worst_code = int(np.max(np.abs(q - np.floor(tc + 0.5)))) if dev.size else 0
+    return Result(miss.size == 0 and tc.size > 0, "int8", func, int(tc.size), float(dev[i]) if dev.size else 0.0,
+                  float(at[i]) if dev.size else 0.0, i, int(miss.size), int(miss.size), worst_code,
+                  int((dev <= 1.0).sum()), 0, [first(k, q, tc) for k in miss[:FIRST]])
+
+
+def gate_requantize(acc, s, zp, lo, hi, q) -> Result:
+    """Requantize outputs (codes) against the true function of the real scale s; worst is the largest |q - t| in steps."""
+    tc = requant_true(acc, s, zp, lo, hi)
+    a = np.broadcast_to(np.asarray(acc, dtype=np.int64), tc.shape).ravel()
+    return _code_gate("requantize", tc, np.broadcast_to(int8_codes(zp), tc.shape), q, a.astype(np.float64),
+                      lambda k, q, tc: (int(k), int(a[k]), int(q[k]), float(tc[k])))
+
+
+def gate_quantized_add(q1, q2, s1, z1, s2, z2, s_out, zo, lo, hi, out) -> Result:
+    """ADD outputs (codes) against the true sum of the real values of q1 and q2; worst is the largest |out - t| in steps."""
+    tc = add_true(q1, q2, s1, z1, s2, z2, s_out, zo, lo, hi)
+    a1, a2 = (np.broadcast_to(int8_codes(v), tc.shape).ravel() for v in (q1, q2))
+    return _code_gate("qadd", tc, np.broadcast_to(int8_codes(zo), tc.shape), out, a1.astype(np.float64),
+                      lambda k, q, tc: (int(k), int(a1[k]), int(a2[k]), int(q[k]), float(tc[k])))
+
+
+def gate_scale(s, m, e, width: int = 24) -> Result:
+    """Scale codes (m, e) against the real scales s: |m 2^-e - s| <= s 2^-width with m in [2^(width-1), 2^width), or the saturating code
+    (2^width - 1, width - 8) where s >= 2^8, or m = 0 where s < 2^-32; worst is the largest relative error in units of 2^-width."""
+    s, m, e = np.broadcast_arrays(np.asarray(s, dtype=np.float64), np.asarray(m, dtype=np.int64), np.asarray(e, dtype=np.int64))
+    s, m, e = s.ravel(), m.ravel(), e.ravel()
+    sat, flush = s >= 2.0 ** 8, s < 2.0 ** -32
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rel = np.abs(np.ldexp(m.astype(np.float64), -e) - s) / s * 2.0 ** width
+    normal = ~sat & ~flush & (m >= 1 << (width - 1)) & (m < 1 << width) & (rel <= 1.0)
+    ok_el = (s > 0) & np.where(sat, (m == (1 << width) - 1) & (e == width - 8), np.where(flush, m == 0, normal))
+    r = _exact_result("int8", "scale", ok_el, np.where(np.isfinite(rel), rel, np.inf), s,
+                      lambda k: (int(k), int(m[k]), int(e[k]), float(s[k])))
+    return r._replace(ok=r.ok and s.size > 0, worst=float(np.max(np.where(sat | flush, 0.0, rel))) if s.size else 0.0)
+
 def maxpool_ref(x, ph, pw, pad, fill):
     """Max of every ph x pw window, stride the window, the input padded by pad with fill on each side."""
     x = np.asarray(x, dtype=np.float64)
@@ -419,6 +485,12 @@ def stage_line(r: Result) -> str:
     elif r.func == "narrow":
         w = f"worst {r.worst_lsb} ULP"
         rule = f"not round-to-nearest-even: {r.over}"
+    elif r.func in ("requantize", "qadd"):
+        w = f"worst {r.worst:.3f} steps from the true value, {r.worst_lsb} codes from its round"
+        rule = f"over max({100 * I8_REL:g}% |t|, one step): {r.over}  (within one step {r.n_floor})"
+    elif r.func == "scale":
+        w = f"worst {r.worst:.3f} x 2^-24 relative"
+        rule = f"off the code: {r.over}"
     elif r.func == "multiplier":
         w = f"worst {r.worst:.3f} LSB of the multiplier from s_a s_w / s_out"
         rule = f"over 0.5 LSB: {r.over}"
@@ -708,6 +780,42 @@ def selftest() -> int:
     check("stage_line", stage_line(gate_matmul("fp32", [(Aw, Bw)], encode("fp32", tm))).startswith("TRUTH fp32 matmul: PASS  n 4  worst 0% of sum|ab|"), True)
     check("merge", (lambda m: (m.ok, m.n, m.over))(merge([gate_requant(100, m1, 0, 0, -128, 127, 50), gate_requant(100, m1, 0, 0, -128, 127, 53)])),
           (False, 2, 1))
+    # affine int8 requantize and ADD on the true function, in output codes
+    gq = lambda acc, sc, q, zp=0, lo=-128, hi=127: gate_requantize(acc, sc, zp, lo, hi, q)
+    check("requantize: 100 x 0.5 is 50", gq([100], [0.5], [50]).ok, True)
+    check("requantize: 51 for 50 is one step", gq([100], [0.5], [51]).ok, True)
+    check("requantize: 52 for 50 fails", gq([100], [0.5], [52]).over, 1)
+    check("requantize: 50.5 passes 51 and 50", gq([101, 101], [0.5, 0.5], [51, 50]).ok, True)
+    check("requantize: 1% of 150.5 steps passes 1.5", gq([301], [0.5], [24], -128).ok, True)
+    check("requantize: and fails 2.5", gq([301], [0.5], [25], -128).ok, False)
+    check("requantize: zp added", gq([100], [0.5], [53], 3).ok, True)
+    check("requantize: zp not added fails", gq([100], [0.5], [50], 5).ok, False)
+    check("requantize: clamped to hi", gq([1000], [0.5], [127]).ok, True)
+    check("requantize: clamped to a ReLU's lo", gq([-1000], [0.5], [-5], -5, -5).ok, True)
+    check("requantize: unclamped fails at a ReLU's lo", gq([-20], [0.5], [-10], 0, 0).ok, False)
+    check("requantize: acc as an int32 word", gq([0xFFFFFF9C], [0.5], [-50]).ok, True)
+    check("requantize: empty fails", gq([], [], []).ok, False)
+    check("requantize: worst in steps", gq([100, 100], [0.5, 0.5], [50, 53]).worst, 3.0)
+    gqa = lambda q1, q2, out, s1=0.25, z1=0, s2=0.25, z2=0, so=1.0, zo=0, lo=-128, hi=127: gate_quantized_add(q1, q2, s1, z1, s2, z2, so, zo, lo, hi, out)
+    check("qadd: (10 + 10) / 4", gqa([10], [10], [5]).ok, True)
+    check("qadd: 3 for 5 fails", gqa([10], [10], [3]).over, 1)
+    check("qadd: z1", gqa([50], [10], [5], z1=40).ok, True)
+    check("qadd: z2", gqa([10], [-10], [8], z2=-30).ok, True)
+    check("qadd: z1 as z2 fails", gqa([10], [-10], [3], z1=-30).ok, False)
+    check("qadd: zo", gqa([10], [10], [9], zo=4).ok, True)
+    check("qadd: s_out", gqa([10], [10], [10], so=0.5).ok, True)
+    check("qadd: s_out ignored fails", gqa([10], [10], [5], so=0.25).ok, False)
+    check("qadd: clamped at lo", gqa([-100], [-100], [3], zo=3, lo=3).ok, True)
+    check("qadd: 8-bit words", gqa([0xF6], [0xF6], [0xFB]).ok, True)
+    check("qadd: empty fails", gqa([], [], []).ok, False)
+    check("scale: 0.75 as 12582912 2^-24", gate_scale([0.75], [12582912], [24]).ok, True)
+    check("scale: one LSB high fails", gate_scale([0.75], [12582913], [24]).ok, False)
+    check("scale: an unnormalized code fails", gate_scale([0.75], [6291456], [23]).ok, False)
+    check("scale: the saturating code", gate_scale([300.0], [2**24 - 1], [16]).ok, True)
+    check("scale: past 2^8 not saturated fails", gate_scale([300.0], [9830400], [15]).ok, False)
+    check("scale: the flush code", gate_scale([1e-12], [0], [55]).ok, True)
+    check("scale: empty fails", gate_scale([], [], []).ok, False)
+    check("stage_line requantize", stage_line(gq([100], [0.5], [50])).startswith("TRUTH int8 requantize: PASS  n 1  worst 0.000 steps"), True)
     print(f"truth selftest: {checks[0]} checks, {fails[0]} failures")
     print(f"RESULT: {'PASSED' if fails[0] == 0 else 'FAILED'}")
     return fails[0]

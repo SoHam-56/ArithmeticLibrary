@@ -27,6 +27,19 @@ def check(what, got, want):
 
 # Mutants of truth.py's source: each breaks one rule, and the selftest must report failures on it.
 MUTANTS = [
+    ("int8 relative tolerance 2%", "I8_REL = TARGET", "I8_REL = 0.02"),
+    ("int8 step floor 2", "tol = np.maximum(I8_REL * np.abs(tc - zp), 1.0)", "tol = np.maximum(I8_REL * np.abs(tc - zp), 2.0)"),
+    ("int8 step floor 0", "tol = np.maximum(I8_REL * np.abs(tc - zp), 1.0)", "tol = I8_REL * np.abs(tc - zp)"),
+    ("int8 tolerance on |tc|, not |t|", "tol = np.maximum(I8_REL * np.abs(tc - zp), 1.0)", "tol = np.maximum(I8_REL * np.abs(tc), 1.0)"),
+    ("int8 vacuous pass", "miss.size == 0 and tc.size > 0", "miss.size == 0"),
+    ("requant true value unclamped", "return np.clip(acc * np.asarray(s, dtype=np.float64) + int8_codes(zp), int8_codes(lo), int8_codes(hi))",
+     "return acc * np.asarray(s, dtype=np.float64) + int8_codes(zp)"),
+    ("requant true value without zp", "acc * np.asarray(s, dtype=np.float64) + int8_codes(zp)", "acc * np.asarray(s, dtype=np.float64) + 0"),
+    ("add true value without z1", "(int8_codes(q1) - int8_codes(z1))", "int8_codes(q1)"),
+    ("add true value without s_out", ") / np.asarray(s_out, dtype=np.float64)", ") / 1.0"),
+    ("scale off by 2 LSB passes", "& (rel <= 1.0)", "& (rel <= 3.0)"),
+    ("scale unnormalized passes", "& (m >= 1 << (width - 1)) & (m < 1 << width)", ""),
+    ("scale saturating code not required", "(m == (1 << width) - 1) & (e == width - 8)", "True"),
     ("target 2%", "TARGET = 0.01", "TARGET = 0.02"),
     ("bound 12%", "BOUND = 0.10", "BOUND = 0.12"),
     ("float floor 2^-125", "F_FLOOR = 2.0 ** -126", "F_FLOOR = 2.0 ** -125"),
