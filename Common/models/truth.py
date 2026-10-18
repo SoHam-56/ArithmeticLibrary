@@ -182,7 +182,7 @@ def line(r: Result, bound=None, target=None) -> str:
 # ── per-stage gates (mesh and pipeline): each stage against the true function of its own actual inputs ──
 
 MM_BOUND = 0.01  # matmul and accumulate: |err| <= max(1% of sum|a b|, 2^-126) per element (Soham, 2026-10-11)
-STAGES = ("matmul", "narrow", "requant", "multiplier", "activation", "maxpool", "dropout")
+STAGES = ("matmul", "narrow", "requantize", "qadd", "scale", "activation", "maxpool", "dropout")
 
 
 def values(fmt, w):
@@ -227,8 +227,8 @@ def gate_matmul(fmt, passes, out, bias=None, bound=None) -> Result:
 
     fp32 and bf16 (fp32 sums): |out - t| <= max(bound sum|a b|, 2^-126); a true sum above fp32's max passes only as max or Inf of
     its sign (gate()'s overflow rule).
-    int8 (int32 sums): exact. Integer arithmetic has one right answer, the int32 accumulator's contract as TFLite's int32
-    accumulation (Soham, 2026-10-11): the exact sum where it fits int32, its two's-complement wrap (sum mod 2^32 as signed int32)
+    int8 (int32 sums): exact. Integer arithmetic has one right answer, the int32 accumulator's contract
+    (Soham, 2026-10-11): the exact sum where it fits int32, its two's-complement wrap (sum mod 2^32 as signed int32)
     where it does not. The error is the distance modulo 2^32; n_ovf counts the sums that wrap.
 
     fmt is the operands' format (passes of (A, B) words); out and bias are accumulator words (fp32, or int32 in int8).
@@ -281,88 +281,6 @@ def gate_narrow(fmt, pre, post) -> Result:
     ulp = np.abs(_order(fmt, post) - _order(fmt, want)).astype(np.float64)
     r = _exact_result(fmt, "narrow", ok_el, ulp, decode("fp32", pre), lambda k: (int(k), int(pre[k]), int(post[k]), int(want[k])))
     return r._replace(worst_lsb=int(r.worst))
-
-
-def requant_ref(acc, mult, shift, zp, amin, amax):
-    """(q_true, real): real = acc mult 2^(shift - 31) + zp clamped to [amin, amax], q_true its round to nearest (half up), exactly."""
-    acc = (((np.asarray(acc, dtype=np.int64) & 0xFFFFFFFF) + 2**31) & 0xFFFFFFFF) - 2**31
-    acc, mult, shift = np.broadcast_arrays(acc, np.asarray(mult, dtype=np.int64), np.asarray(shift, dtype=np.int64))
-    d = 31 - shift
-    if np.any((d < 1) | (d > 62)) or np.any((mult < 0) | (mult >= 2**31)):
-        raise ValueError("requant_ref: shift must be in [-31, 30] and mult in [0, 2^31)")
-    prod = acc * mult  # below 2^62 in magnitude, so int64 holds it exactly
-    q = np.right_shift(prod + np.left_shift(np.int64(1), d - 1), d)  # floor((prod + 2^(d-1)) / 2^d): round half up
-    zp, amin, amax = (np.asarray(v, dtype=np.int64) for v in (zp, amin, amax))
-    real = np.clip(prod / np.ldexp(1.0, d) + zp, amin, amax)
-    return np.clip(q + zp, amin, amax), real
-
-
-def gate_requant(acc, mult, shift, zp, amin, amax, q) -> Result:
-    """Requantize outputs (int8 codes) within I8_FLOOR LSB of round(real); worst is the largest |q - real| in LSBs."""
-    qt, real = requant_ref(acc, mult, shift, zp, amin, amax)
-    q = int8_codes(q).reshape(qt.shape)
-    lsb, dev = np.abs(q - qt).ravel(), np.abs(q - real).ravel()
-    miss = np.flatnonzero(lsb > I8_FLOOR)
-    i = int(np.argmax(dev))
-    a = np.broadcast_to(np.asarray(acc, dtype=np.int64), qt.shape).ravel()
-    return Result(miss.size == 0, "int8", "requant", int(qt.size), float(dev[i]), float(real.ravel()[i]), i, int(miss.size),
-                  int(miss.size), int(lsb.max()), 0, 0, [(int(k), int(a[k]), int(q.ravel()[k]), int(qt.ravel()[k])) for k in miss[:FIRST]])
-
-
-def gate_multiplier(mult, shift, real) -> Result:
-    """The host's requantize multipliers against the real scale ratios they encode (s_a s_w / s_out): mult 2^(shift - 31) must be
-    within half the multiplier's own LSB, 2^(shift - 32), of real, as TFLite's QuantizeMultiplier rounds; mult in [2^30, 2^31).
-
-    worst is the largest |mult 2^(shift - 31) - real| in the multiplier's LSBs (pass: <= 0.5)."""
-    mult, shift, real = np.broadcast_arrays(np.asarray(mult, dtype=np.int64), np.asarray(shift, dtype=np.int64),
-                                            np.asarray(real, dtype=np.float64))
-    lsb = np.ldexp(1.0, shift - 31)
-    dev = np.abs(mult * lsb - real) / lsb  # exact enough: mult < 2^31 and the products are float64
-    ok_el = (dev <= 0.5 + 1e-6) & (mult >= 2**30) & (mult < 2**31) & (real > 0)
-    return _exact_result("int8", "multiplier", ok_el.ravel(), dev.ravel(), real.ravel(),
-                         lambda k: (int(k), int(mult.ravel()[k]), int(shift.ravel()[k]), float(real.ravel()[k])))._replace(
-        worst=float(dev.max()) if dev.size else 0.0)
-
-
-def _srdhm(a: int, b: int) -> int:
-    """TFLite's SaturatingRoundingDoublingHighMul: (a b + nudge) / 2^31 truncated toward zero; INT32_MIN squared saturates."""
-    if a == b == -2**31:
-        return 2**31 - 1
-    v = a * b + (2**30 if a * b >= 0 else 1 - 2**30)
-    return v // 2**31 if v >= 0 else -((-v) // 2**31)
-
-
-def _rdbpot(x: int, e: int) -> int:
-    """TFLite's RoundingDivideByPOT: x / 2^e, ties away from zero."""
-    mask = (1 << e) - 1
-    return (x >> e) + int((x & mask) > (mask >> 1) + int(x < 0))
-
-
-def _mbqm1(x: int, m: int, s: int, rounding: str) -> int:
-    """TFLite's MultiplyByQuantizedMultiplierSmallerThanOneExp (s <= 0) in DOUBLE, or MultiplyByQuantizedMultiplier under TFLITE_SINGLE_ROUNDING."""
-    if rounding == "DOUBLE":
-        return _rdbpot(_srdhm(x, m), -s)
-    n = 31 - s
-    return (x * m + (1 << (n - 1))) >> n
-
-
-def add_ref(q1, q2, w: dict, rounding: str = "DOUBLE") -> np.ndarray:
-    """TFLite's int8 ADD (reference_integer_ops::Add, left shift 20) on Python integers, from the layer's words w (zp1 .. amax)."""
-    if rounding not in ("DOUBLE", "SINGLE"):
-        raise ValueError(f"add_ref: rounding must be DOUBLE or SINGLE, not {rounding!r}")
-    def one(a, b):
-        x = _mbqm1((int(a) - w["zp1"]) << 20, w["m1"], w["s1"], rounding) + _mbqm1((int(b) - w["zp2"]) << 20, w["m2"], w["s2"], rounding)
-        return min(w["amax"], max(w["amin"], _mbqm1(x, w["mo"], w["so"], rounding) + w["zpo"]))
-    return np.vectorize(one, otypes=[np.int64])(int8_codes(q1), int8_codes(q2))
-
-
-def gate_add(q1, q2, w: dict, out, rounding: str = "DOUBLE") -> Result:
-    """The int8 ADD stage: bit-exact against TFLite's reference kernel (add_ref), not a float64 true function: spec Decision 1, the one exception to the true-function gates."""
-    want = add_ref(q1, q2, w, rounding)
-    got = int8_codes(out).reshape(want.shape)
-    a1, a2, g, x = int8_codes(q1).ravel(), int8_codes(q2).ravel(), got.ravel(), want.ravel()
-    return _exact_result("int8", "add", g == x, np.abs(g - x).astype(float), x.astype(float),
-                         lambda k: (int(k), int(a1[k]), int(a2[k]), int(g[k]), int(x[k])))
 
 
 # ── affine int8 requantize and ADD on the true function (decimal rule: |hw - t| <= max(1% |t|, s_out), t clamped to the output range) ──
@@ -480,9 +398,6 @@ def stage_line(r: Result) -> str:
         w = (f"worst {100 * r.worst:.3g}% of sum|ab|" if np.isfinite(r.worst) else f"worst {worst_text(r.worst)}") + \
             (f" ({r.worst_lsb} in int32)" if r.fmt == "int8" else "")
         rule = f"over max({100 * MM_BOUND:g}% of sum|ab|, 2^-126): {r.over}  (floor {r.n_floor}, overflow {r.n_ovf})"
-    elif r.func == "requant":
-        w = f"worst {r.worst:.3f} LSB from real, {r.worst_lsb} from round(real)"
-        rule = f"over {I8_FLOOR} LSB: {r.over}"
     elif r.func == "narrow":
         w = f"worst {r.worst_lsb} ULP"
         rule = f"not round-to-nearest-even: {r.over}"
@@ -492,9 +407,6 @@ def stage_line(r: Result) -> str:
     elif r.func == "scale":
         w = f"worst {r.worst:.3f} x 2^-24 relative"
         rule = f"off the code: {r.over}"
-    elif r.func == "multiplier":
-        w = f"worst {r.worst:.3f} LSB of the multiplier from s_a s_w / s_out"
-        rule = f"over 0.5 LSB: {r.over}"
     else:
         w = f"worst |out - want| {r.worst:.6g}"
         rule = f"not exact: {r.over}"
@@ -609,7 +521,7 @@ def selftest() -> int:
     i8("int8 tanh q=0, out 1 (true 0)", "tanh", 0, 1, True, 0)
     i8("int8 tanh q=0, out 2 (true 0)", "tanh", 0, 2, False, 1)
     i8("int8 tanh 8-bit words: q 0xFE (-2), out 0xF8 (-8)", "tanh", 0xFE, 0xF8, True, 0)
-    sq = (3.5 / 8, 0, 1 / 256, -128)  # sigmoid with TFLite's output quantization
+    sq = (3.5 / 8, 0, 1 / 256, -128)  # sigmoid with its fixed output quantization (1/256, -128)
     r = i8("int8 sigmoid q=100 (clamps to 127), out 127", "sigmoid", 100, 127, True, 0, sq)
     i8("int8 sigmoid q=100, out 120 (7 LSB, 2.7% of the clamped value)", "sigmoid", 100, 120, True, 0, sq)
     i8("int8 sigmoid q=-20 (q_true -128), out -125 (3 LSB)", "sigmoid", -20, -125, False, 1, sq)
@@ -710,48 +622,6 @@ def selftest() -> int:
     nr("NaN", 0x7FC00001, 0x7FC0, True)
     nr("NaN, out a number", 0x7FC00001, 0x3F80, False)
     check("narrow ULP distance", gate_narrow("bf16", [0x3F80C000], [0x3F7F]).worst_lsb, 2)
-    # requantize: within 1 LSB of round(acc mult 2^(shift-31) + zp), clamped
-    m1 = 1 << 30  # 0.5 at shift 0
-    rq = lambda what, acc, q, ok, shift=0, zp=0, lo=-128, hi=127, mult=m1: check(f"requant {what}", gate_requant(acc, mult, shift, zp, lo, hi, q).ok, ok)
-    rq("100 * 0.5", 100, 50, True)
-    rq("100 * 0.5, 1 LSB up", 100, 51, True)
-    rq("100 * 0.5, 2 LSB up", 100, 52, False)
-    rq("100 * 0.5, 2 LSB down", 100, 48, False)
-    rq("101 * 0.5 = 50.5 rounds to 51; 50 is 1 LSB", 101, 50, True)
-    rq("101 * 0.5, 49", 101, 49, False)
-    rq("-101 * 0.5 = -50.5 rounds to -50; -52 is 2 LSB", -101, -52, False)
-    rq("shift -3: 100 * 0.5 / 8 = 6.25", 100, 6, True, shift=-3)
-    rq("shift -3, 8", 100, 8, False, shift=-3)
-    rq("shift 2: 10 * 0.5 * 4 = 20", 10, 20, True, shift=2)
-    rq("zero point 7", 100, 57, True, zp=7)
-    rq("zero point 7 left out", 100, 50, False, zp=7)
-    rq("clamp to 127", 1000, 127, True)
-    rq("clamp to 127, out 120", 1000, 120, False)
-    rq("clamp min 3 (ReLU at zp 3)", -1000, 3, True, zp=3, lo=3)
-    rq("8-bit word 0xCE (-50)", -100, 0xCE, True)
-    check("requant_ref exact near 2^62", [int(requant_ref(-2**31, 2**31 - 1, s, 0, -2**40, 2**40)[0]) for s in (0, -31)], [-(2**31 - 1), -1])
-    check("requant worst LSBs", gate_requant([100, 100], m1, 0, 0, -128, 127, [50, 53]).worst_lsb, 3)
-    # the int8 ADD, bit-exact: (q1 + q2) / 4 with every multiplier 0.5, zero points 0 and 3, a ReLU clamp at zp_o
-    aw = dict(zp1=0, zp2=0, m1=m1, s1=0, m2=m1, s2=0, mo=m1, so=-20, zpo=0, amin=-128, amax=127)
-    check("add (10 + 10) / 4", add_ref([10], [10], aw).tolist(), [5])
-    check("add -6 / 4 ties away from zero", add_ref([-3], [-3], aw).tolist(), [-2])
-    check("add exact", gate_add([10, -3, 100], [10, -3, 100], aw, [5, -2, 50]).ok, True)
-    check("add one code off", gate_add([10, -3, 100], [10, -3, 100], aw, [5, -1, 50]).over, 1)
-    check("add zero points", add_ref([13], [10], dict(aw, zp1=3, zpo=3)).tolist(), [8])
-    check("add ReLU clamp at zp_o", add_ref([-100], [-100], dict(aw, zpo=3, amin=3)).tolist(), [3])
-    check("add 8-bit words", gate_add([0xF6], [0xF6], aw, [0xFB]).ok, True)
-    # the requantize multipliers: mult 2^(shift - 31) within half a multiplier LSB of the real ratio
-    import math
-    def qm(r):  # TFLite QuantizeMultiplier, here to make the cases
-        q, e = math.frexp(r)
-        m = int(round(q * 2**31))
-        return (m // 2, e + 1) if m == 2**31 else (m, e)
-    reals = np.array([0.000123, 0.0071, 0.5, 0.999999999, 1.7e-5])
-    ms, es = zip(*(qm(float(r)) for r in reals))
-    check("multiplier: QuantizeMultiplier's words pass", gate_multiplier(ms, es, reals).ok, True)
-    check("multiplier: one LSB high fails", gate_multiplier(np.array(ms) + 1, es, reals).over, 5)
-    check("multiplier: shift one low fails", gate_multiplier(ms, np.array(es) - 1, reals).over, 5)
-    check("multiplier: an unnormalized mult fails", gate_multiplier([ms[2] // 2], [es[2] + 1], [reals[2]]).ok, False)
     # max pooling: the max of each window of the actual inputs, padded with -Inf (int8: -128)
     x = np.arange(16.0).reshape(4, 4) - 8.0
     xw = encode("fp32", x)
@@ -779,8 +649,8 @@ def selftest() -> int:
     check("dropout int8: dropped to zp", gate_dropout("int8", [10, 20], [True, False], [10, -5], 0.5, True, -5).ok, True)
     check("dropout int8: dropped to 0, zp -5", gate_dropout("int8", [10, 20], [True, False], [10, 0], 0.5, True, -5).ok, False)
     check("stage_line", stage_line(gate_matmul("fp32", [(Aw, Bw)], encode("fp32", tm))).startswith("TRUTH fp32 matmul: PASS  n 4  worst 0% of sum|ab|"), True)
-    check("merge", (lambda m: (m.ok, m.n, m.over))(merge([gate_requant(100, m1, 0, 0, -128, 127, 50), gate_requant(100, m1, 0, 0, -128, 127, 53)])),
-          (False, 2, 1))
+    check("merge", (lambda m: (m.ok, m.n, m.over))(merge([gate_requantize([100], [0.5], 0, -128, 127, [50]),
+                                                         gate_requantize([100], [0.5], 0, -128, 127, [53])])), (False, 2, 1))
     # affine int8 requantize and ADD on the true function, in output codes
     gq = lambda acc, sc, q, zp=0, lo=-128, hi=127: gate_requantize(acc, sc, zp, lo, hi, q)
     check("requantize: 100 x 0.5 is 50", gq([100], [0.5], [50]).ok, True)

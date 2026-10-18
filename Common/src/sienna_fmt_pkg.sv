@@ -57,18 +57,15 @@ package sienna_fmt_pkg;
     return 2;
   endfunction
 
-  // valid_i to done_o of tfliteRequant, TFLite's int8 requantize.
+  // valid_i to done_o of int8Requantizer, the affine int8 requantize.
   function automatic int req_lat();
     return 4;
   endfunction
 
-  // valid_i to done_o of tfliteAdd, TFLite's int8 ADD: 6 stages, deepest 52 levels against tfliteRequant's 53 (rs1_yd_add_d/_s).
+  // valid_i to done_o of int8QuantizedAdder, the affine int8 ADD: 6 stages.
   function automatic int qadd_lat();
     return 6;
   endfunction
-
-  // The rounding of TFLite's reference kernels, pinned at G0: SIENNA's testbenches/tflite_int8/rounding.txt.
-  localparam string REQ_ROUNDING = "DOUBLE";
 
   // A finite fp32 constant in a format with 8 exponent bits, rounded to nearest even, right-aligned.
   function automatic logic [31:0] from_fp32(input logic [31:0] x, input int man_w);

@@ -37,11 +37,6 @@ POINTS = [  # (unit, target, need, bad, firing scan)
     ("Multipliers/Int", "vivado_tb", TB, TB_BAD, True), ("Multipliers/Int", "lint", (), LINT_BAD, True),
     ("Multipliers/Fx", "verilator", TB, TB_BAD, True), ("Multipliers/Fx", "check", TB, TB_BAD, True),  # sweep takes a slice's plusargs, not a check alone
     ("Multipliers/Fx", "vivado_tb", TB, TB_BAD, True), ("Multipliers/Fx", "lint", (), LINT_BAD, True),
-    ("Requant", "both", TB, TB_BAD, True), ("Requant", "vivado_tb", TB, TB_BAD, True), ("Requant", "lint", (), LINT_BAD, True),
-    ("Requant", "lint_bad", (r"^REJECTED$",), (r"^NOT-REJECTED$",), False),  # its log shows the %Error it provokes
-    ("Add", "both", TB, TB_BAD, True), ("Add", "vivado_tb", TB, TB_BAD, True), ("Add", "lint", (), LINT_BAD, True),
-    ("Add", "lint_bad", (r"^REJECTED$",), (r"^NOT-REJECTED$",), False),  # its log shows the %Error it provokes
-    ("Add", "selftest", (r"^check_add selftest: 0 failures$", r"^add_oracle selftest: 0 failures$"), TB_BAD, True),  # a passing self-test prints no %Error: one that does fails
     ("Requantizer", "verilator", TB, TB_BAD, True), ("Requantizer", "vivado_tb", TB, TB_BAD, True), ("Requantizer", "lint", (), LINT_BAD, True),
     ("Requantizer", "shift_bad", (r"^FIRED$",), (r"^NOT-FIRED$",), False),  # its log shows the assertion's %Error
     ("QuantizedAdder", "verilator", TB, TB_BAD, True), ("QuantizedAdder", "vivado_tb", TB, TB_BAD, True),
@@ -50,7 +45,6 @@ POINTS = [  # (unit, target, need, bad, firing scan)
 ]
 CREDIT_OK = 11  # TB_credit_link: 8 (STAGES, MODE) runs and 3 $fatal modes, one 'credit OK' line each
 LINT_RUNS = {"Adders/FP/lint": 2, "Adders/Int/lint": 1, "Multipliers/FP/lint": 2, "Multipliers/Int/lint": 2, "Multipliers/Fx/lint": 1,
-             "Requant/lint": 2, "Add/lint": 2,
              "Requantizer/lint": 2, "QuantizedAdder/lint": 2}  # Common/lint.sh lines each lint prints, one per configuration
 TABLE = {f"{u}/{t}": (u, t, need, bad, firing) for u, t, need, bad, firing in POINTS}
 
@@ -58,7 +52,7 @@ TABLE = {f"{u}/{t}": (u, t, need, bad, firing) for u, t, need, bad, firing in PO
 class ArilSpec(regress.Spec):
     title = "ARITHMETICLIBRARY REGRESSION"
     artifacts = ()  # each bench's dumps stay in its Verilator directory
-    drop = ("ROUNDING", "RANDOM", "ORACLE")  # Add's Makefile takes these with ?=: a caller's would change a point's vectors
+    drop = ("RANDOM",)  # Requantizer's and QuantizedAdder's Makefiles take it with ?=: a caller's would change a point's vectors
 
     def points(self, small, formats):
         return ["selftest"] + list(TABLE)
@@ -190,11 +184,8 @@ def test_verdict_rules():
     tr = "truth selftest: 126 checks, 0 failures\nRESULT: PASSED\ntest_truth: 97 checks, 0 failures\nRESULT: PASSED\n"
     assert SPEC.verdict("Common/truth", tr, 0) == "PASS" and SPEC.verdict("Common/truth", tr.split("test_truth")[1], 0).startswith("FAIL (no 'truth selftest")  # the selftest must have run
     assert SPEC.verdict("Common/truth", tr.replace("PASSED\ntest", "FAILED\ntest"), 0).startswith("FAIL (log: RESULT: FAILED")
-    sa = "check_add selftest: 0 failures\nRESULT: PASSED\nadd_oracle selftest: 0 failures\nRESULT: PASSED\n"
-    assert SPEC.verdict("Add/selftest", sa, 0) == "PASS"
-    assert SPEC.verdict("Add/selftest", "check_add selftest: 0 failures\nRESULT: PASSED\nadd_oracle selftest: 1 failures\nRESULT: FAILED\n", 0).startswith("FAIL")
-    assert SPEC.verdict("Add/selftest", sa.split("add_oracle")[0] + "RESULT: PASSED\n", 0).startswith("FAIL (no 'add_oracle")  # one checker's self-test alone is not the point
-    assert SPEC.verdict("Add/selftest", "check_add selftest: 2 failures\nRESULT: FAILED\nadd_oracle selftest: 0 failures\nRESULT: PASSED\n", 0).startswith("FAIL")  # the first checker failing is not hidden by the second passing
+    assert SPEC.verdict("Requantizer/shift_bad", "%Error: int8Requantizer: shift 56 above 55\nFIRED\n", 0) == "PASS"  # its own %Error is the point
+    assert SPEC.verdict("Requantizer/shift_bad", "NOT-FIRED\n", 2).startswith("FAIL")  # the assertion did not fire
     assert SPEC.verdict("selftest", "ALL 9 PASSED\n", 0) == "PASS" and SPEC.verdict("selftest", "1 of 9 FAILED\n", 0).startswith("FAIL")
     two = "lint fpAdder EXP_W=8 MAN_W=7: 3 warnings, 0 errors\nlint fpAdder EXP_W=8 MAN_W=23: 2 warnings, 0 errors\n"
     assert SPEC.verdict("Adders/FP/lint", two, 0) == "PASS" and SPEC.verdict("Adders/FP/lint", "", 0) == "FAIL (0 of 2 lint runs counted)"  # a clean exit is not a lint
@@ -210,7 +201,7 @@ def test_points_and_commands():
         u = name.rsplit("/", 1)[0]
         assert name == "selftest" or os.path.isfile(os.path.join(ROOT, u, "Makefile")), name
     assert SPEC.argv("Multipliers/FPWiden/fp16", None) == ["make", "-C", "Multipliers/FPWiden", "verilator", "FORMAT=fp16"]
-    assert SPEC.argv("Requant/lint_bad", None) == ["make", "-C", "Requant", "lint_bad"]
+    assert SPEC.argv("Requantizer/shift_bad", None) == ["make", "-C", "Requantizer", "shift_bad"]
     for name in pts[1:]:  # every target exists in its unit's Makefile
         u, t = TABLE[name][:2]
         t = "verilator" if u == "Multipliers/FPWiden" else t
@@ -246,12 +237,12 @@ def test_every_unit_has_points():
 
 @selftest
 def test_point_drops_unit_variables():
-    """A point never sees the caller's ROUNDING, RANDOM or ORACLE, which Add's Makefile takes with ?=."""
-    names = ("ROUNDING", "RANDOM", "ORACLE")
+    """A point never sees the caller's RANDOM, which the Requantizer and QuantizedAdder Makefiles take with ?=."""
+    names = ("RANDOM",)
     saved = {k: os.environ.get(k) for k in names}
-    os.environ.update(ROUNDING="SINGLE", RANDOM="10", ORACLE="/x")
+    os.environ.update(RANDOM="10")
     try:
-        env = regress.point_env(SPEC, "Add/both", "s", 8)
+        env = regress.point_env(SPEC, "QuantizedAdder/verilator", "s", 8)
     finally:
         for k, v in saved.items():
             os.environ.pop(k) if v is None else os.environ.__setitem__(k, v)
@@ -448,8 +439,8 @@ def test_regression_target():
     names = [x.split("--name ")[1].split()[0] for x in lines if "--action point " in x]
     assert r.returncode == 0 and names == SPEC.points(False, []), (r.stderr, names[:3])
     assert all("--run " in x and x.rstrip().endswith("--keep-going") for x in lines if "--action point " in x) and "--action summary" in lines[-1] and "--run " in lines[-1], lines[-1]
-    one = run("regression/Requant/lint").stdout.splitlines()
-    assert len(one) == 1 and "--name Requant/lint" in one[0] and "--keep-going" not in one[0] and "--run" not in one[0], one
+    one = run("regression/Requantizer/lint").stdout.splitlines()
+    assert len(one) == 1 and "--name Requantizer/lint" in one[0] and "--keep-going" not in one[0] and "--run" not in one[0], one
     s = run("regression-summary").stdout.splitlines()
     assert len(s) == 1 and "--action summary" in s[0] and "--run" not in s[0], s
 

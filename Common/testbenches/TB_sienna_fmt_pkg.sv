@@ -54,7 +54,6 @@ module TB_sienna_fmt_pkg;
     expect_eq("add_lat(0,7)", add_lat(0, 7), 1);
     expect_eq("fx_lat()", fx_lat(), 2);
     expect_eq("req_lat()", req_lat(), 4);
-    expect_eq("REQ_ROUNDING is SINGLE or DOUBLE", (REQ_ROUNDING == "SINGLE") || (REQ_ROUNDING == "DOUBLE"), 1);
     expect_eq("ACC8 localparam", ACC8, 32);
     expect_eq("MUL8 localparam", MUL8, 1);
     expect_eq("INT8 localparam", INT8, 1);

@@ -75,19 +75,10 @@ MUTANTS = [
     ("narrow truncates", 'return encode(fmt, ftz(decode("fp32", pre)))',
      'return (np.asarray(pre, dtype=np.int64) >> 16) & 0xFFFF if fmt == "bf16" else encode(fmt, ftz(decode("fp32", pre)))'),
     ("narrow NaN never matches", "ok_el = (vw == vp) | (np.isnan(vw) & np.isnan(vp))", "ok_el = vw == vp"),
-    ("requant truncates", "np.right_shift(prod + np.left_shift(np.int64(1), d - 1), d)", "np.right_shift(prod, d)"),
-    ("requant zero point left out", "return np.clip(q + zp, amin, amax), real", "return np.clip(q, amin, amax), real"),
-    ("requant within 2 LSB", "miss = np.flatnonzero(lsb > I8_FLOOR)", "miss = np.flatnonzero(lsb > I8_FLOOR + 1)"),
-    ("multiplier within one LSB", "ok_el = (dev <= 0.5 + 1e-6)", "ok_el = (dev <= 1.5)"),
-    ("multiplier normalization unchecked", "& (mult >= 2**30) & (mult < 2**31)", ""),
     ("maxpool first element", "xp[i * ph:i * ph + ph, j * pw:j * pw + pw].max()", "xp[i * ph:i * ph + ph, j * pw:j * pw + pw].ravel()[0]"),
     ("maxpool pad 0", "fill = -128.0 if fmt == \"int8\" else -np.inf", "fill = 0.0"),
     ("dropout unscaled", "kept = values(fmt, encode(fmt, xv / (1.0 - p)))", "kept = xv"),
     ("dropout mask ignored", "want = np.where(keep, kept, dropped) if training else xv", "want = kept if training else xv"),
-    ("add ties toward zero", "(mask >> 1) + int(x < 0))", "(mask >> 1))"),
-    ("add zp1 dropped", '(int(a) - w["zp1"]) << 20', 'int(a) << 20'),
-    ("add clamp ignored", 'min(w["amax"], max(w["amin"], _mbqm1(x, w["mo"], w["so"], rounding) + w["zpo"]))',
-     'min(127, max(-128, _mbqm1(x, w["mo"], w["so"], rounding) + w["zpo"]))'),
 ]
 
 
@@ -173,25 +164,20 @@ def main():
             check("bad call raises", "returned", "ValueError")
         except ValueError:
             check("bad call raises", "ValueError", "ValueError")
-    # the stage references against independent ones: TFLite's requantize, fpu's narrowing, loops, brute-force windows
+    # the stage references against independent ones: Fractions, fpu's narrowing, loops, brute-force windows
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import fpu  # noqa: E402
     import ipu  # noqa: E402
     acc = rng.integers(-2**31, 2**31, 20000)
-    mult = rng.integers(1 << 30, 1 << 31, 20000)
-    shift = rng.integers(-31, 1, 20000)
+    sc = np.exp(rng.uniform(np.log(1e-9), np.log(4.0), 20000))
     zp, lo, hi = rng.integers(-128, 128, 20000), -128, 127
-    qt, real = truth.requant_ref(acc, mult, shift, zp, lo, hi)
     from fractions import Fraction
-    exact = [min(hi, max(lo, math.floor(Fraction(int(a) * int(m), 2 ** (31 - int(s))) + Fraction(1, 2)) + int(z)))
-             for a, m, s, z in zip(acc[:3000], mult[:3000], shift[:3000], zp[:3000])]
-    check("requant_ref against Fractions, 3000 draws", qt[:3000].tolist(), exact)
-    tfl = np.asarray(ipu.requant(acc, mult, shift, zp, lo, hi, "DOUBLE"), dtype=np.int64)
-    check("TFLite's requantize within 1 LSB of requant_ref, 20000 draws", int(np.abs(tfl - qt).max()) <= 1, True)
-    check("gate_requant passes TFLite's words", truth.gate_requant(acc, mult, shift, zp, lo, hi, tfl).ok, True)
-    reals = np.exp(rng.uniform(np.log(1e-6), np.log(0.99), 5000))
-    qm = [ipu.quantize_multiplier(float(r)) for r in reals]
-    check("gate_multiplier passes ipu.quantize_multiplier's words, 5000 ratios", truth.gate_multiplier([m for m, _ in qm], [e for _, e in qm], reals).ok, True)
+    tc = truth.requant_true(acc, sc, zp, lo, hi)
+    exact = [float(min(hi, max(lo, Fraction(int(a)) * Fraction(float(c)) + int(z)))) for a, c, z in zip(acc[:3000], sc[:3000], zp[:3000])]
+    check("requant_true against Fractions, 3000 draws (float64 error under 1e-6 steps)", bool(np.allclose(tc[:3000], exact, rtol=0, atol=1e-6)), True)
+    codes = [ipu.encode_scale(float(c)) for c in sc]
+    q = ipu.requantize(acc, [m for m, _ in codes], [e for _, e in codes], zp, lo, hi)
+    check("gate_requantize passes ipu.requantize on encode_scale's words, 20000 draws", truth.gate_requantize(acc, sc, zp, lo, hi, q).ok, True)
     w = np.concatenate([rng.integers(0, 1 << 32, 20000), [0x7F7F8000, 0xFF7F8000, 0x7F7F7FFF, 0x3F808000, 0x3F818000]])
     w = w[((w >> 23) & 0xFF) != 0]  # fpNarrow flushes subnormal inputs as narrow_ref does; compared on normals, NaN and Inf
     want = np.asarray(fpu.narrow(fpu.FORMATS["bf16"], w), dtype=np.int64)
@@ -211,27 +197,28 @@ def main():
         xp = np.pad(x, pad, constant_values=-np.inf)
         bf = [[max(xp[i * ph + a, j * pw + b] for a in range(ph) for b in range(pw)) for j in range(ref.shape[1])] for i in range(ref.shape[0])]
         check(f"maxpool_ref {ph}x{pw} pad {pad} against brute force", ref.tolist(), bf)
-    # the int8 ADD: add_ref against ipu.tflite_add (two independent implementations) in both roundings, and gate_add failing one code off
-    add_bad = {"DOUBLE": 0, "SINGLE": 0}
+    # the int8 ADD: add_true against Fractions, and gate_quantized_add passing ipu.qadd on encode_add's words, failing one code off by two
+    bad, n = 0, 0
     for i in range(100):
-        s1, s2, so = np.exp2(rng.uniform(-10, 2, 3))
+        r1, r2 = np.exp2(rng.uniform(-10, 0, 2))  # most sums stay off the rails
         zp1, zp2, zpo = (int(z) for z in rng.integers(-128, 128, 3))
-        clamp = ("NONE", "RELU", "RELU6")[i % 3]
-        lo, hi = (-128, 127) if clamp == "NONE" else (zpo, 127) if clamp == "RELU" else (zpo, int(min(127, zpo + round(6.0 / so))))
-        w = dict(zp1=zp1, zp2=zp2, zpo=zpo, amin=lo, amax=hi, **ipu.add_params(s1, s2, so))
         q1, q2 = rng.integers(-128, 128, 256), rng.integers(-128, 128, 256)
-        for rd in add_bad:
-            want = np.asarray(ipu.tflite_add(q1, q2, *[w[f] for f in ("zp1", "zp2", "m1", "s1", "m2", "s2", "mo", "so", "zpo", "amin", "amax")], rd),
-                              dtype=np.int64)
-            add_bad[rd] += int((truth.add_ref(q1, q2, w, rd) != want).sum())
-            if i == 0:
-                check(f"gate_add passes ipu.tflite_add's codes ({rd})", truth.gate_add(q1, q2, w, want, rd).ok, True)
-                off = want.copy()
-                off[17] += 1 if off[17] < hi else -1
-                r = truth.gate_add(q1, q2, w, off & 0xFF, rd)
-                check(f"gate_add fails one code off by one ({rd})", (r.ok, r.over, r.first[0][0]), (False, 1, 17))
-    for rd, n in add_bad.items():
-        check(f"add_ref against ipu.tflite_add, 100 word sets x 256 pairs ({rd})", n, 0)
+        m1, m2, e = ipu.encode_add(float(r1), float(r2))
+        y = ipu.qadd(q1, q2, zp1, zp2, m1, m2, e, zpo, -128, 127)
+        r = truth.gate_quantized_add(q1, q2, r1, zp1, r2, zp2, 1.0, zpo, -128, 127, y)
+        bad, n = bad + r.over, n + r.n
+        if i == 0:
+            t = truth.add_true(q1[:20], q2[:20], r1, zp1, r2, zp2, 1.0, zpo, -128, 127)
+            ex = [float(min(127, max(-128, Fraction(float(r1)) * (int(a) - zp1) + Fraction(float(r2)) * (int(b) - zp2) + zpo)))
+                  for a, b in zip(q1[:20], q2[:20])]
+            check("add_true against Fractions", bool(np.allclose(t, ex, rtol=0, atol=1e-6)), True)
+            ta = truth.add_true(q1, q2, r1, zp1, r2, zp2, 1.0, zpo, -128, 127)
+            off = y.copy()
+            k = int(np.flatnonzero((np.abs(ta) < 120) & (np.abs(ta - zpo) < 100))[0])  # inside the rails, where the floor is one step
+            off[k] += 2 if off[k] < 126 else -2
+            rr = truth.gate_quantized_add(q1, q2, r1, zp1, r2, zp2, 1.0, zpo, -128, 127, off & 0xFF)
+            check("gate_quantized_add fails one code off by two", (rr.ok, rr.over, rr.first[0][0]), (False, 1, k))
+    check("gate_quantized_add passes ipu.qadd on encode_add's words, 100 sets x 256 pairs", (bad, n), (0, 25600))
 
     # the selftest passes, and fails on each mutant
     with contextlib.redirect_stdout(io.StringIO()):
