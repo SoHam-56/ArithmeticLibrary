@@ -307,7 +307,8 @@ def _code_gate(func, tc, zp, q, at, first):
     zp = np.broadcast_to(int8_codes(zp), tc.shape).ravel()
     tc = tc.ravel()
     q = int8_codes(q).astype(np.float64).ravel()
-    q = np.broadcast_to(q, tc.shape) if q.size == 1 else q
+    if q.size != tc.size:  # one output per true value: a collapsed set must not pass against all of them
+        raise ValueError(f"{func}: {q.size} outputs for {tc.size} true values")
     dev = np.abs(q - tc)
     tol = np.maximum(I8_REL * np.abs(tc - zp), 1.0)
     miss = np.flatnonzero(dev > tol)
@@ -674,6 +675,11 @@ def selftest() -> int:
     check("requantize: 2-D sums, per-column scales and zero points", (lambda r: (r.ok, r.n))(gate_requantize(
         [[100, 100], [-50, 7]], [[0.5, 0.25], [0.5, 0.25]], [[0, 3], [0, 3]], -128, 127, [[50, 28], [-25, 5]])), (True, 4))
     check("requantize: one output as a 1 x 1 array", gate_requantize([[100]], [[0.5]], 0, -128, 127, [[50]]).ok, True)
+    try:
+        gate_requantize([100, 102], [0.5, 0.5], 0, -128, 127, [50])
+        check("requantize: one output for two true values raises", "returned", "ValueError")
+    except ValueError:
+        check("requantize: one output for two true values raises", "ValueError", "ValueError")
     gqa = lambda q1, q2, out, s1=0.25, z1=0, s2=0.25, z2=0, so=1.0, zo=0, lo=-128, hi=127: gate_quantized_add(q1, q2, s1, z1, s2, z2, so, zo, lo, hi, out)
     check("qadd: (10 + 10) / 4", gqa([10], [10], [5]).ok, True)
     check("qadd: 3 for 5 fails", gqa([10], [10], [3]).over, 1)
