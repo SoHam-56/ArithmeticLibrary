@@ -42,11 +42,16 @@ POINTS = [  # (unit, target, need, bad, firing scan)
     ("Add", "both", TB, TB_BAD, True), ("Add", "vivado_tb", TB, TB_BAD, True), ("Add", "lint", (), LINT_BAD, True),
     ("Add", "lint_bad", (r"^REJECTED$",), (r"^NOT-REJECTED$",), False),  # its log shows the %Error it provokes
     ("Add", "selftest", (r"^check_add selftest: 0 failures$", r"^add_oracle selftest: 0 failures$"), TB_BAD, True),  # a passing self-test prints no %Error: one that does fails
+    ("Requantizer", "verilator", TB, TB_BAD, True), ("Requantizer", "vivado_tb", TB, TB_BAD, True), ("Requantizer", "lint", (), LINT_BAD, True),
+    ("Requantizer", "shift_bad", (r"^FIRED$",), (r"^NOT-FIRED$",), False),  # its log shows the assertion's %Error
+    ("QuantizedAdder", "verilator", TB, TB_BAD, True), ("QuantizedAdder", "vivado_tb", TB, TB_BAD, True),
+    ("QuantizedAdder", "lint", (), LINT_BAD, True), ("QuantizedAdder", "shift_bad", (r"^FIRED$",), (r"^NOT-FIRED$",), False),
     ("Converters/FPNarrow", "all", TB + (r"^bad_format OK:", r"^fpNarrow lint \(MAN_W 7, 23\): 0 warnings, 0 errors$"), TB_BAD, True),
 ]
 CREDIT_OK = 11  # TB_credit_link: 8 (STAGES, MODE) runs and 3 $fatal modes, one 'credit OK' line each
 LINT_RUNS = {"Adders/FP/lint": 2, "Adders/Int/lint": 1, "Multipliers/FP/lint": 2, "Multipliers/Int/lint": 2, "Multipliers/Fx/lint": 1,
-             "Requant/lint": 2, "Add/lint": 2}  # Common/lint.sh lines each lint prints, one per configuration
+             "Requant/lint": 2, "Add/lint": 2,
+             "Requantizer/lint": 2, "QuantizedAdder/lint": 2}  # Common/lint.sh lines each lint prints, one per configuration
 TABLE = {f"{u}/{t}": (u, t, need, bad, firing) for u, t, need, bad, firing in POINTS}
 
 
