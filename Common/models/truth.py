@@ -6,8 +6,8 @@ a bit-exact model of the hardware is never the gate.
 Floats pass when |out - t| <= bound |t|, or when |out| and |t| are both <= F_FLOOR; a NaN or Inf output where t is finite fails.
 Overflow rule: where t is above the format's max, the output passes only as max or Inf of t's sign (an exact value above max
 rounds to either).
-int8 passes when |q_out - q_true| <= I8_FLOOR, q_true = round(t / s_out) + z_out clamped, or when the dequantized output is within
-bound of t clamped to the output's range.
+int8 decodes each code to s_out (q - z_out) and passes when |hw - t| <= max(bound |t|, s_out), t the true value clamped to the output's
+range (Soham 2026-10-17: one rule for every format, one output step as the floor).
 """
 import argparse
 import sys
@@ -19,7 +19,6 @@ TARGET = 0.01  # the accuracy the lanes must reach (the restructure spec's REL)
 BOUND = 0.10  # the activation waiver in force (Soham, 2026-10-11); every run also reports TARGET
 REL = TARGET  # the restructure spec's name for the target
 F_FLOOR = 2.0 ** -126  # floats: an output and a true value both at or below it pass
-I8_FLOOR = 1  # int8: an output within one LSB of the rounded true value passes
 SELU_LAMBDA = 1.0507009873554804934193349852946  # Klambauer et al.
 SELU_ALPHA = 1.6732632423543772848170429916717
 FUNCS = ("selu", "sigmoid", "tanh", "relu", "linear")
@@ -112,21 +111,22 @@ def _float_err(fmt, t, o):
 
 
 def _int8_err(func, q, out, s_in, z_in, s_out, z_out):
-    """Per-element error and LSB distance: 0 within I8_FLOOR, else the dequantized output against t clamped to the output's range."""
+    """Per-element relative error |hw - t| / |t| of the decoded output against t clamped to the output's range, 0 within one output step;
+    the codes off round(t), the within-one-step mask, t and round(t) in codes."""
     with np.errstate(divide="ignore", invalid="ignore", over="ignore"):  # s_out = inf: a zero multiplier, q_true is the zero point
         return _int8_err_body(func, q, out, s_in, z_in, s_out, z_out)
 
 
 def _int8_err_body(func, q, out, s_in, z_in, s_out, z_out):
     t = ref(func, s_in * (q - z_in))
-    lo, hi = s_out * (-128 - z_out), s_out * (127 - z_out)
-    qt = np.clip(np.floor(t / s_out + 0.5) + z_out, -128, 127)
+    tcode = np.clip(t / s_out + z_out, -128, 127)  # t clamped to the output's range, in codes (s_out = inf: the zero point)
+    qt = np.floor(tcode + 0.5)
     lsb = np.abs(out - qt)
-    tc = np.clip(t, lo, hi)
-    deq = s_out * (out - z_out)
-    rel = np.where(tc != 0, np.abs(deq - tc) / np.abs(tc), np.where(deq == 0, 0.0, np.inf))
+    d = np.abs(out - tcode)  # |hw - t| in output steps
+    mag = np.abs(tcode - z_out)  # |t| in output steps
+    rel = np.where(mag > 0, d / np.where(mag > 0, mag, 1.0), np.where(d == 0, 0.0, np.inf))
     rel = np.where(np.isnan(rel), np.inf, rel)
-    floor = lsb <= I8_FLOOR
+    floor = d <= 1.0  # within one output step: the floor of max(bound |t|, s_out)
     return np.where(floor, 0.0, rel), lsb, floor, t, qt
 
 
@@ -308,8 +308,6 @@ def _code_gate(func, tc, zp, q, at, first):
     tc = tc.ravel()
     q = int8_codes(q).astype(np.float64).ravel()
     q = np.broadcast_to(q, tc.shape) if q.size == 1 else q
-    if q.shape != tc.shape:
-        raise ValueError(f"{func}: {q.size} outputs for {tc.size} true values")
     dev = np.abs(q - tc)
     tol = np.maximum(I8_REL * np.abs(tc - zp), 1.0)
     miss = np.flatnonzero(dev > tol)
@@ -509,11 +507,11 @@ def selftest() -> int:
     fl("bf16 selu 0x7F73, out max", "bf16", "selu", 0x7F73, bmax, True, 0)
     fl("bf16 selu 0x7F72 (true 3.3798e38, below max), out 0x7F7D", "bf16", "selu", 0x7F72, 0x7F7D, True, 0)
     check("fmax", (fmax("bf16"), fmax("fp32")), (float(decode("bf16", bmax)), float(np.finfo(np.float32).max)))
-    # int8: within 1 LSB of the rounded true value, or within the bound dequantized
+    # int8: the decoded output within max(bound |t|, one step) of t clamped to the output range
     tq = (4 / 128, 0, 1 / 128, 0)  # tanh: x = q / 32, out q / 128
     i8 = lambda what, func, q, o, ok, over=None, quant=tq, **kw: fl(what, "int8", func, q, o, ok, over, quant=quant, **kw)
     i8("int8 tanh q=2 (x 1/16, q_true 8), out 8", "tanh", 2, 8, True, 0)
-    i8("int8 tanh q=2, out 9 (1 LSB)", "tanh", 2, 9, True, 0)
+    i8("int8 tanh q=2, out 9 (1.01 steps from the true 7.99: over one step)", "tanh", 2, 9, False, 1)
     i8("int8 tanh q=2, out 10 (2 LSB, 25%)", "tanh", 2, 10, False, 1)
     i8("int8 tanh q=2, out 6 (2 LSB below)", "tanh", 2, 6, False, 1)
     i8("int8 tanh q=32 (q_true 97), out 99 (2 LSB, 1.5%)", "tanh", 32, 99, True, 0)
@@ -527,6 +525,12 @@ def selftest() -> int:
     i8("int8 sigmoid q=-20 (q_true -128), out -125 (3 LSB)", "sigmoid", -20, -125, False, 1, sq)
     i8("int8 linear identity", "linear", np.arange(-128, 128), np.arange(-128, 128), True, 0, (0.05, 7, 0.05, 7))
     i8("int8 linear off by 2", "linear", 3, 5, False, 1, (0.05, 0, 0.05, 0))
+    i8("int8 linear true 1.45 codes, out 0 (1.45 steps; within one code of round(t))", "linear", 1, 0, False, 1, (0.0145, 0, 0.01, 0))
+    i8("int8 linear true 1.45 codes, out 2 (0.55 steps)", "linear", 1, 2, True, 0, (0.0145, 0, 0.01, 0))
+    i8("int8 linear true 5.4 codes, out 4 (1.4 steps)", "linear", 1, 4, False, 1, (0.054, 0, 0.01, 0))
+    i8("int8 linear true 5.4 codes, out 6", "linear", 1, 6, True, 0, (0.054, 0, 0.01, 0))
+    i8("int8 linear true 72 (|t| 2.0 = 200 steps), out 90 (0.18, under 10% of |t|)", "linear", 1, 90, True, 0, (2.0, 0, 0.01, -128))
+    i8("int8 linear true 72 (|t| 2.0), out 93 (0.21, over 10% of |t|)", "linear", 1, 93, False, 1, (2.0, 0, 0.01, -128))
     i8("int8 linear 100 past the output range (q_true 127), out 120 (5.5% of the clamp)", "linear", 100, 120, True, 0, (1.0, 0, 0.05, 0))
     i8("int8 linear 100 past the output range, out 110 (13% of the clamp)", "linear", 100, 110, False, 1, (1.0, 0, 0.05, 0))
     i8("int8 relu q < z_in, out z_out", "relu", -100, -20, True, 0, (0.05, -20, 0.05, -20))
