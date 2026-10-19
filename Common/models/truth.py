@@ -288,17 +288,23 @@ def gate_narrow(fmt, pre, post) -> Result:
 I8_REL = TARGET  # int8's relative tolerance; the floor is one output step
 
 
+def _bound(b):
+    """A clamp bound in output codes, float64: integer values and 8-bit words through int8_codes, an unrounded real bound as is."""
+    b = np.asarray(b, dtype=np.float64)
+    return np.where(b == np.floor(b), int8_codes(np.floor(b)), np.clip(b, -128.0, 127.0))
+
+
 def requant_true(acc, s, zp, lo, hi):
-    """The true requantized value in output codes: acc s + zp clamped to [lo, hi], float64 (acc int32, s the real scale > 0)."""
+    """The true requantized value in output codes: acc s + zp clamped to [lo, hi] (codes, or unrounded real bounds), float64 (acc int32, s the real scale > 0)."""
     acc = (((np.asarray(acc, dtype=np.int64) & 0xFFFFFFFF) + 2**31) & 0xFFFFFFFF) - 2**31
-    return np.clip(acc * np.asarray(s, dtype=np.float64) + int8_codes(zp), int8_codes(lo), int8_codes(hi))
+    return np.clip(acc * np.asarray(s, dtype=np.float64) + int8_codes(zp), _bound(lo), _bound(hi))
 
 
 def add_true(q1, q2, s1, z1, s2, z2, s_out, zo, lo, hi):
-    """The true ADD in output codes: (s1 (q1 - z1) + s2 (q2 - z2)) / s_out + zo clamped to [lo, hi], float64."""
+    """The true ADD in output codes: (s1 (q1 - z1) + s2 (q2 - z2)) / s_out + zo clamped to [lo, hi] (codes, or unrounded real bounds), float64."""
     v = (np.asarray(s1, dtype=np.float64) * (int8_codes(q1) - int8_codes(z1)) +
          np.asarray(s2, dtype=np.float64) * (int8_codes(q2) - int8_codes(z2))) / np.asarray(s_out, dtype=np.float64)
-    return np.clip(v + int8_codes(zo), int8_codes(lo), int8_codes(hi))
+    return np.clip(v + int8_codes(zo), _bound(lo), _bound(hi))
 
 
 def _code_gate(func, tc, zp, q, at, first):
@@ -692,6 +698,12 @@ def selftest() -> int:
     check("qadd: clamped at lo", gqa([-100], [-100], [3], zo=3, lo=3).ok, True)
     check("qadd: 8-bit words", gqa([0xF6], [0xF6], [0xFB]).ok, True)
     check("qadd: empty fails", gqa([], [], []).ok, False)
+    check("qadd: a real clamp bound stays real (hi 56.43): 55 fails", gqa([127], [127], [55], s1=1.0, s2=0.0, hi=56.43).ok, False)
+    check("qadd: and 56 passes", gqa([127], [127], [56], s1=1.0, s2=0.0, hi=56.43).ok, True)
+    check("qadd: a negative real bound (hi -56.426): -55 fails", gqa([127], [0], [-55], s1=1.0, s2=0.0, hi=-56.426).ok, False)
+    check("qadd: and -56 passes", gqa([127], [0], [-56], s1=1.0, s2=0.0, hi=-56.426).ok, True)
+    check("requantize: a real clamp bound stays real (hi 56.43): 55 fails", gq([1000], [0.5], [55], 0, -128, 56.43).ok, False)
+    check("requantize: and 56 passes", gq([1000], [0.5], [56], 0, -128, 56.43).ok, True)
     check("scale: 0.75 as 12582912 2^-24", gate_scale([0.75], [12582912], [24]).ok, True)
     check("scale: one LSB high fails", gate_scale([0.75], [12582913], [24]).ok, False)
     check("scale: an unnormalized code fails", gate_scale([0.75], [6291456], [23]).ok, False)
