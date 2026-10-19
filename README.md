@@ -1,6 +1,13 @@
 # ArithmeticLibrary
 
-Arithmetic units in SystemVerilog (fp32, bf16 and int8 adders and multipliers, a fixed-point MAC, the TFLite requantizer, the fp32-to-bf16 narrower, credit links), each with a bench against a reference (SoftFloat, a C model through DPI, or the Python models in `Common/models`).
+Arithmetic units in SystemVerilog (fp32, bf16 and int8 adders and multipliers, a fixed-point MAC, the int8 requantizer and quantized adder, the fp32-to-bf16 narrower, credit links), each with a bench against a reference (SoftFloat, a C model through DPI, or the Python models in `Common/models`).
+
+The two int8 units work for any model's real scales, not one framework's arithmetic:
+
+- `int8Requantizer` (`Requantizer/`) turns an int32 sum into an int8 output: it multiplies by the channel's scale, held as a 24-bit mantissa and a right shift, rounds half up, adds the zero point and clamps (4 cycles).
+- `int8QuantizedAdder` (`QuantizedAdder/`) adds two int8 tensors with different scales, as a residual connection does: each input's offset from its zero point is multiplied by its scale ratio (two 32-bit mantissas on one shared shift), then rounded, offset and clamped like the requantizer (6 cycles).
+
+Both are checked against the exact real-valued result: every output must be within one output step, or 1%, of it.
 
 ## Regression
 
