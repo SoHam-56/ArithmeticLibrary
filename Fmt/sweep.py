@@ -51,11 +51,11 @@ def requantize_sets():
     of REQUANT_ZPS and each of int8_vectors.clamps; (m, e) = ipu.encode_scale(s), the words the host sends."""
     rng = np.random.default_rng(11)
     rows = []
-    for b in REQUANT_BINADES:
-        for f in REQUANT_FACTORS + tuple(float(x) for x in np.exp2(rng.uniform(0.0, 1.0, 6))):
-            s = math.ldexp(f, b)
-            m, e = ipu.encode_scale(s)
-            rows += [(s, m, e, zp, lo, hi) for zp in REQUANT_ZPS for lo, hi in int8_vectors.clamps(zp)]
+    for binade in REQUANT_BINADES:
+        for factor in REQUANT_FACTORS + tuple(float(x) for x in np.exp2(rng.uniform(0.0, 1.0, 6))):
+            scale = math.ldexp(factor, binade)
+            mantissa, shift = ipu.encode_scale(scale)
+            rows += [(scale, mantissa, shift, zero_point, low, high) for zero_point in REQUANT_ZPS for low, high in int8_vectors.clamps(zero_point)]
     return rows
 
 
@@ -159,6 +159,22 @@ def selftest():
     return bad
 
 
+EXACT_KINDS = {("int8", "mul"), ("int8", "add"), ("int8", "cmp"), ("int8", "relu"), ("fp32", "cmp"), ("bf16", "cmp"), ("fp32", "narrow"),
+               ("bf16", "narrow")}  # judged exactly: their worst is a distance (0 when every output is the reference)
+CODE_KINDS = ("requantize", "quantized_add")  # int8 outputs under max(1% |t|, one step)
+
+
+def accuracy(fmt, kind, worst, worst_steps, worst_relative, relative_rows):
+    """A GATE line's accuracy: floats in percent of |t|; the code kinds in percent of the decimal value |t| over the rows 1% decides, and in output
+    steps over every row (a row within one step passes on the floor and has no percent of its own); exact kinds as a distance."""
+    if kind in CODE_KINDS:
+        rel = f"{100 * worst_relative:.4g}%" if relative_rows else "none"
+        return f"worst {rel} of |t| over the {relative_rows} rows the 1% tolerance decides, worst {worst_steps:.4g} steps over every row"
+    if (fmt, kind) in EXACT_KINDS:
+        return f"worst distance {worst:.4g} (exact)"
+    return f"worst {100 * worst:.4g}% of |t|"
+
+
 def run_slice(exe, mode, args, sample, sample_n):
     cmd = [exe, "--mode", mode] + sum(([f"--{k}", str(v)] for k, v in args.items()), []) + ["--sample", sample, "--sample-n", str(sample_n)]
     t = time.time()
@@ -225,6 +241,7 @@ def main():
             plan = [(m, {k: (max(1, int(v * a.scale)) if k in ("n", "count") else v) for k, v in args.items()}) for m, args in plan]
         per = max(1, SAMPLE // len(plan))
         lines, bad, n, miss, worst, fails, ungated, floor_only = [], 0, 0, 0, -1.0, [], 0, 0
+        worst_steps, worst_relative, relative_rows = -1.0, -1.0, 0  # the int8 code kinds' |hw - t| in steps, and in percent of |t| where 1% decides
         with cf.ThreadPoolExecutor(a.jobs) as ex:
             futs = [ex.submit(run_slice, exe, m, args, os.path.join(sdir, f"s{i:03d}.txt"), per) for i, (m, args) in enumerate(plan)]
             for f in futs:
@@ -251,6 +268,13 @@ def main():
                     ungated += int(u.group(1)) if u else 0
                     floor_only += int(fl.group(1)) if fl else 0
                     worst = max(worst, float(m.group(3)))
+                    c = re.search(r" worst_steps (\S+) worst_relative (\S+) relative_rows (\d+)", s[0])
+                    if not c:  # an old harness's line: the code kinds' accuracy would go unreported
+                        ok = False
+                        fails.append("SWEEP line without worst_steps, worst_relative or relative_rows")
+                    else:
+                        worst_steps, worst_relative = max(worst_steps, float(c.group(1))), max(worst_relative, float(c.group(2)))
+                        relative_rows += int(c.group(3))
                 if not ok:
                     bad += 1
                     fails.append(" ".join(os.path.basename(c) for c in cmd[:6]) + f": rc {rc}")
@@ -264,7 +288,7 @@ def main():
             k_, f_, r_, d_, _ = truefn.recheck(p)
             rows, dis = rows + r_, dis + d_
         v = gate_verdict(bad, miss, dis, rows, n, ungated, floor_only)
-        g = (f"GATE {key} {fmt}: {v}  n {n}  miss {miss}  ungated {ungated}  floor-decided {floor_only}  worst {100 * worst:.4g}% (exact kinds: the distance)"
+        g = (f"GATE {key} {fmt}: {v}  n {n}  miss {miss}  ungated {ungated}  floor-decided {floor_only}  {accuracy(fmt, kind, worst, worst_steps, worst_relative, relative_rows)}"
              f"  slices {len(plan)} "
              f"(failed {bad})  recheck {rows} rows, {dis} disagreements  {time.time() - t0:.0f} s")
         verdicts.append(g)
