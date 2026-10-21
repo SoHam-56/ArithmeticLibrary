@@ -42,17 +42,25 @@ POINTS = [  # (unit, target, need, bad, firing scan)
     ("QuantizedAdder", "verilator", TB, TB_BAD, True), ("QuantizedAdder", "vivado_tb", TB, TB_BAD, True),
     ("QuantizedAdder", "lint", (), LINT_BAD, True), ("QuantizedAdder", "shift_bad", (r"^FIRED$",), (r"^NOT-FIRED$",), False),
     ("Converters/FPNarrow", "all", TB + (r"^bad_format OK:", r"^fpNarrow lint \(MAN_W 7, 23\): 0 warnings, 0 errors$"), TB_BAD, True),
+    ("Common", "pkg_fp32", TB, TB_BAD, True), ("Common", "pkg_bf16", TB, TB_BAD, True), ("Common", "pkg_int8", TB, TB_BAD, True),  # the define map
 ]
+NEW_UNITS = (("Multipliers/BF16", "bf16Multiplier", "verilator"), ("Adders/BF16", "bf16Adder", "verilator"),
+             ("Multipliers/BF16Wide", "bf16WideMultiplier", "verilator"), ("Converters/FP32ToBF16", "fp32ToBf16", "check"),
+             ("Multipliers/Int8", "int8Multiplier", "verilator"), ("Multipliers/Int16", "int16Multiplier", "verilator"),
+             ("Multipliers/Int24", "int24Multiplier", "verilator"), ("Adders/Int32", "int32Adder", "verilator"))  # the per-format units
+POINTS += [(u, t, TB + (rf"^{top}: \d+ .* 0 errors", ), TB_BAD, True) for u, top, t in NEW_UNITS]  # each on its direct reference bench
+POINTS += [(u, "lint", (rf"^lint {top}: 0 warnings, 0 errors$",), LINT_BAD, True) for u, top, _ in NEW_UNITS]  # lint clean; make -C Fmt equiv
 CREDIT_OK = 11  # TB_credit_link: 8 (STAGES, MODE) runs and 3 $fatal modes, one 'credit OK' line each
 LINT_RUNS = {"Adders/FP/lint": 2, "Adders/Int/lint": 1, "Multipliers/FP/lint": 2, "Multipliers/Int/lint": 2, "Multipliers/Fx/lint": 1,
              "Requantizer/lint": 2, "QuantizedAdder/lint": 2}  # Common/lint.sh lines each lint prints, one per configuration
+LINT_RUNS.update({f"{u}/lint": 1 for u, *_ in NEW_UNITS})
 TABLE = {f"{u}/{t}": (u, t, need, bad, firing) for u, t, need, bad, firing in POINTS}
 
 
 class ArilSpec(regress.Spec):
     title = "ARITHMETICLIBRARY REGRESSION"
     artifacts = ()  # each bench's dumps stay in its Verilator directory
-    drop = ("RANDOM",)  # Requantizer's and QuantizedAdder's Makefiles take it with ?=: a caller's would change a point's vectors
+    drop = ("RANDOM",)  # Requantizer's and QuantizedAdder's Makefiles take it with ?=: a caller's would change a point's vectors (FMT: regress.MAKE_VARS)
 
     def points(self, small, formats):
         return ["selftest"] + list(TABLE)
@@ -233,6 +241,15 @@ def test_every_unit_has_points():
     listed = {u for u, *_ in POINTS}
     missing = [u for u in units if u not in listed]
     assert len(units) >= 13 and not missing, f"units without a make regression point: {missing}"
+
+
+@selftest
+def test_every_new_unit_has_its_bench():
+    """Each per-format unit has a direct reference bench point and a lint point, and the bench's need line names the unit."""
+    for u, top, t in NEW_UNITS:
+        assert f"{u}/{t}" in TABLE and f"{u}/lint" in TABLE, u
+        assert SPEC.verdict(f"{u}/{t}", f"{top}: 10 vectors against the reference, 0 errors\nRESULT: PASSED\n", 0) == "PASS", u
+        assert SPEC.verdict(f"{u}/{t}", f"{top}: 10 vectors against the reference, 3 errors\nRESULT: FAILED\n", 0) != "PASS", u
 
 
 @selftest
