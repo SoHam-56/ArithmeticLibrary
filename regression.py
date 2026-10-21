@@ -50,6 +50,17 @@ NEW_UNITS = (("Multipliers/BF16", "bf16Multiplier", "verilator"), ("Adders/BF16"
              ("Multipliers/Int24", "int24Multiplier", "verilator"), ("Adders/Int32", "int32Adder", "verilator"))  # the per-format units
 POINTS += [(u, t, TB + (rf"^{top}: \d+ .* 0 errors", ), TB_BAD, True) for u, top, t in NEW_UNITS]  # each on its direct reference bench
 POINTS += [(u, "lint", (rf"^lint {top}: 0 warnings, 0 errors$",), LINT_BAD, True) for u, top, _ in NEW_UNITS]  # lint clean; make -C Fmt equiv
+MUTANT_OK = (r"^mutant \S+ caught by its bench: ",)
+MUTANT_BAD = (r"SURVIVED", r"^mutant \S+ FAIL")
+POINTS += [(u, "mutant", MUTANT_OK, MUTANT_BAD, False) for u, *_ in NEW_UNITS]  # testbenches/mutant.sed: a planted fault the unit's own bench must fail
+POINTS += [("Common", "pkg_mutant", MUTANT_OK, MUTANT_BAD, False)]  # the define map's planted fault against TB_sienna_fmt_map
+def mutant_total():
+    """Fmt's mutant count: one per line of testbenches/mutants.list, two for a 'y' line (TB_fmt and the sweep)."""
+    rows = [ln.rstrip("\n").split("|") for ln in open(os.path.join(ROOT, "Fmt", "testbenches", "mutants.list")) if ln.strip() and not ln.startswith("#")]
+    return sum(2 if r[6] == "y" else 1 for r in rows)
+
+
+MUTANT_TOTAL = mutant_total()
 FMT_POINTS = ("mul_fp32", "mul_bf16_o16", "mul_bf16_o32", "mul_int8_o16", "mul_int8_o32", "add_fp32", "add_bf16", "add_bf16_w16", "add_int8",
               "cmp_fp32", "cmp_bf16", "cmp_int8", "relu_fp32", "relu_bf16", "relu_int8")  # fmt_mul and fmt_add at every width, fmt_greater_than and fmt_relu, per define
 POINTS += [("Fmt", p, TB + (rf"^lint \S+ {p}: 0 library warnings, 0 new unit warnings \(\d+ in the recorded baseline\), 0 unplaced warnings, 0 errors$",), TB_BAD, True)
@@ -70,7 +81,9 @@ POINTS += [
      + tuple(rf"^controls OK: {w} refused$" for w in ("fp32 fmt_mul -GDATA_WIDTH=16", "bf16 fmt_mul -GEXT_DATA_WIDTH=24", "int8 fmt_mul -GDATA_WIDTH=16",
                                                      "int8 fmt_mul -GEXT_DATA_WIDTH=12", "bf16 fmt_add -GDATA_WIDTH=8", "int8 fmt_add -GDATA_WIDTH=8")),
      (r"controls FAIL",), True),
-    ("Fmt", "mutants", (r"^mutants: (\d+) of \1 caught$",), (r"SURVIVED",), False),  # its lines quote the failures the mutants provoke
+    ("Fmt", "mutants", (rf"^mutants: {MUTANT_TOTAL} of {MUTANT_TOTAL} caught$",), (r"SURVIVED",), False),  # pinned to the list; lines quote failures
+    ("Fmt", "lint_tops", tuple(rf"^lint fmt_fn_\w+ {n}: 0 library warnings, 0 new unit warnings \(\d+ in the recorded baseline\), 0 unplaced warnings, 0 errors$"
+                              for n in ("narrow_fp32", "narrow_bf16", "requantize_int8", "quantized_add_int8")), (r"NEW WARNING", r"UNPLACED"), True),
     ("Fmt", "equiv_quick", TB + (r"^EQUIV: 10 of 10 pairs equal$",), TB_BAD, True),  # make -C Fmt equiv is the proof; this runs its harness on a slice
 ]
 CREDIT_OK = 11  # TB_credit_link: 8 (STAGES, MODE) runs and 3 $fatal modes, one 'credit OK' line each
@@ -277,6 +290,18 @@ def test_every_new_unit_has_its_bench():
         assert f"{u}/{t}" in TABLE and f"{u}/lint" in TABLE, u
         assert SPEC.verdict(f"{u}/{t}", f"{top}: 10 vectors against the reference, 0 errors\nRESULT: PASSED\n", 0) == "PASS", u
         assert SPEC.verdict(f"{u}/{t}", f"{top}: 10 vectors against the reference, 3 errors\nRESULT: FAILED\n", 0) != "PASS", u
+
+
+@selftest
+def test_mutants_are_pinned():
+    """Fmt/mutants passes only at the list's full count, and every per-format unit has a planted fault of its own."""
+    assert MUTANT_TOTAL >= 30
+    assert SPEC.verdict("Fmt/mutants", f"mutants: {MUTANT_TOTAL} of {MUTANT_TOTAL} caught\n", 0) == "PASS"
+    assert SPEC.verdict("Fmt/mutants", f"mutants: {MUTANT_TOTAL - 1} of {MUTANT_TOTAL - 1} caught\n", 0) != "PASS"
+    for u, *_ in NEW_UNITS:
+        assert f"{u}/mutant" in TABLE and os.path.exists(os.path.join(ROOT, u, "testbenches", "mutant.sed")), u
+        assert SPEC.verdict(f"{u}/mutant", "mutant x SURVIVED its bench\n", 1) != "PASS", u
+    assert SPEC.verdict("Common/pkg_mutant", "mutant x caught by its bench: 1 errors\n", 0) == "PASS"
 
 
 @selftest
