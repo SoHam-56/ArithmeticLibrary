@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-# Common AriL checks: the format package, the fp32 units dumped for the Python model, the models fpu.py (narrow, widen) and ipu.py, the true-function gate truth.py, and the credit link modules.
+# Common AriL checks: the format package and its define map per define, the fp32 units dumped for the Python model, the models fpu.py (narrow, widen) and ipu.py, the true-function gate truth.py, and the credit link modules.
 PRJ_DIR = $(shell pwd)
 ARIL    = $(PRJ_DIR)/..
 TB_DIR  = $(PRJ_DIR)/testbenches
@@ -10,6 +10,20 @@ $(shell mkdir -p $(PRJ_DIR)/Verilator)  # Verilator makes --Mdir but not its par
 pkg:
 	verilator $(FLAGS) --top-module TB_sienna_fmt_pkg --Mdir $(PRJ_DIR)/Verilator/pkg $(PRJ_DIR)/src/sienna_fmt_pkg.sv $(TB_DIR)/TB_sienna_fmt_pkg.sv -o sim
 	$(PRJ_DIR)/Verilator/pkg/sim
+
+# the define map under each define (pkg_fp32 also with no define, which must be fp32): TB_sienna_fmt_map against the spec's table
+define map_run
+	verilator $(FLAGS) $(2) --top-module TB_sienna_fmt_map --Mdir $(PRJ_DIR)/Verilator/map_$(1) $(PRJ_DIR)/src/sienna_fmt_pkg.sv \
+	  $(TB_DIR)/TB_sienna_fmt_map.sv -o sim
+	$(PRJ_DIR)/Verilator/map_$(1)/sim
+endef
+pkg_fp32:
+	$(call map_run,fp32,+define+FMT_FP32)
+	$(call map_run,default,+define+NO_FMT_DEFINE)
+pkg_bf16:
+	$(call map_run,bf16,+define+FMT_BF16)
+pkg_int8:
+	$(call map_run,int8,+define+FMT_INT8)
 
 FP32_UNITS = $(ARIL)/Multipliers/Radix4Booth/src/R4Booth.sv $(ARIL)/Multipliers/Karatsuba/src/karatsubaUnsigned.sv \
              $(ARIL)/Multipliers/FP32/src/fp32Multiplier.sv $(ARIL)/Adders/FP32/src/LZC.sv $(ARIL)/Adders/FP32/src/fp32Adder.sv
@@ -83,4 +97,4 @@ $(CREDIT_FATALS): credit_fatal_%:
 	line=$$(command grep -m1 -F "$$want" $$log); \
 	[ -n "$$line" ] && echo "credit OK: MODE=$$m fired: $$line" || { echo "credit FAIL: MODE=$$m: no '$$want'"; tail -20 $$log; exit 1; }
 
-.PHONY: pkg dump32 ipu fpu truth credit credit_lint $(CREDIT_RUNS) $(CREDIT_FATALS)
+.PHONY: pkg pkg_fp32 pkg_bf16 pkg_int8 dump32 ipu fpu truth credit credit_lint $(CREDIT_RUNS) $(CREDIT_FATALS)
