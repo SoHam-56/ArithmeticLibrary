@@ -345,7 +345,7 @@ def check_activation(fmt, func, x, y, quant=None, bound=None) -> Check:
 
 def check_matmul(fmt, passes, out, bias=None) -> Check:
     """Mesh sums: floats within max(REL sum|ab|, F_FLOOR) of sum over passes of A @ B plus the bias row (Soham, 2026-10-11: the
-    bias is not in the scale); int8 int32 sums exact modulo 2^32 (TFLite's int32 accumulation)."""
+    bias is not in the scale); int8 int32 sums exact modulo 2^32 (two's-complement int32 accumulation)."""
     _fmt_ok(fmt)
     val = (lambda w: ftz(decode(fmt, w))) if fmt in FLOATS else (lambda w: int_value(w, 8))
     t = s = 0.0
