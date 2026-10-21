@@ -8,7 +8,7 @@ module TB_bf16Adder #(
 );
   localparam int EXPONENT_WIDTH = 8, MANTISSA_WIDTH = 7, DATA_WIDTH = 16;
   localparam int EXP_W = EXPONENT_WIDTH, MAN_W = MANTISSA_WIDTH, W = DATA_WIDTH;  // the names fp_stim.svh reads
-  localparam int TOL = 3;
+  localparam int ULP_TOLERANCE = 3;
   import "DPI-C" function int c_fp_add(input int a, input int b, input int man_w, output int flags);
 
   logic clk = 0, rstn = 0;
@@ -34,7 +34,7 @@ module TB_bf16Adder #(
   string dump;
 
   // Distance in ulps on the ordered line of values: -0 and +0 are the same point, as sign-magnitude subtraction is not.
-  function automatic longint ord(input logic [W-1:0] x);
+  function automatic longint ordered_value(input logic [W-1:0] x);
     return x[W-1] ? -longint'(x[W-2:0]) : longint'(x[W-2:0]);
   endfunction
 
@@ -63,7 +63,7 @@ module TB_bf16Adder #(
     if (valid && t_issue < 0) t_issue = cyc;
     if (rstn && done) begin
       tx_t t;
-      bit rm, fm;
+      bit result_ok, flags_ok;
       int diff;
       if (lat < 0) lat = cyc - t_issue;  // edges from the one that took valid_i to the one that sees done_o
       if (q.size() == 0) begin
@@ -72,12 +72,12 @@ module TB_bf16Adder #(
       end else begin
         t = q.pop_front();
         checked++;
-        diff = int'(ord(res) - ord(t.res));
+        diff = int'(ordered_value(res) - ordered_value(t.res));
         if (diff < 0) diff = -diff;
-        rm = (res == t.res) || (is_nan(t.res) && is_nan(res)) || (!is_nan(t.res) && diff <= TOL) ||
+        result_ok = (res == t.res) || (is_nan(t.res) && is_nan(res)) || (!is_nan(t.res) && diff <= ULP_TOLERANCE) ||
              (un && res[W-2:0] == '0 && t.res[W-2:MAN_W] == '0);
-        fm = (ov == t.ov) && (inv == t.inv) && ((un == t.un) || (un && res[W-2:0] == '0));
-        if (!rm || !fm) begin
+        flags_ok = (ov == t.ov) && (inv == t.inv) && ((un == t.un) || (un && res[W-2:0] == '0));
+        if (!result_ok || !flags_ok) begin
           errs++;
           if (errs <= 20)
             $display("[FAIL] %h + %h: got %h (ov %b un %b inv %b), SoftFloat %h (ov %b un %b inv %b)",

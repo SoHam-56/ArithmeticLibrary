@@ -57,7 +57,7 @@ module TB_bf16WideMultiplier #(
     if (valid && t_issue < 0) t_issue = cyc;
     if (rstn && done) begin
       tx_t t;
-      bit rm, fm;
+      bit result_ok, flags_ok;
       if (lat < 0) lat = cyc - t_issue;  // edges from the one that took valid_i to the one that sees done_o
       if (q.size() == 0) begin
         errs++;
@@ -65,9 +65,9 @@ module TB_bf16WideMultiplier #(
       end else begin
         t = q.pop_front();
         checked++;
-        rm = (res == t.res) || (is_nan32(t.res) && is_nan32(res));  // exact: no rounding tolerance
-        fm = (ov == t.ov) && (inv == t.inv) && (un == t.un);
-        if (!rm || !fm) begin
+        result_ok = (res == t.res) || (is_nan32(t.res) && is_nan32(res));  // exact: no rounding tolerance
+        flags_ok = (ov == t.ov) && (inv == t.inv) && (un == t.un);
+        if (!result_ok || !flags_ok) begin
           errs++;
           if (errs <= 20)
             $display("[FAIL] %h * %h: got %h (ov %b un %b inv %b), SoftFloat %h (ov %b un %b inv %b)",

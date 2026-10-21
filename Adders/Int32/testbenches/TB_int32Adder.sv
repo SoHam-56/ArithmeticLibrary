@@ -9,15 +9,15 @@ module TB_int32Adder #(
   import "DPI-C" function int c_int_add(input int a, input int b, input int w);
   localparam logic [DATA_WIDTH-1:0] ONE = DATA_WIDTH'(1);
   localparam logic [DATA_WIDTH-1:0] ONES = {DATA_WIDTH{1'b1}};
-  localparam logic [DATA_WIDTH-1:0] MX = {1'b0, {(DATA_WIDTH - 1) {1'b1}}};
-  localparam logic [DATA_WIDTH-1:0] MN = {1'b1, {(DATA_WIDTH - 1) {1'b0}}};
+  localparam logic [DATA_WIDTH-1:0] MAX_VALUE = {1'b0, {(DATA_WIDTH - 1) {1'b1}}};
+  localparam logic [DATA_WIDTH-1:0] MIN_VALUE = {1'b1, {(DATA_WIDTH - 1) {1'b0}}};
   // MAX+1, MIN-1, MIN+MIN, MAX+MAX, -1+1, MIN+MAX, with their sums worked by hand.
-  localparam int NK = 6;
-  localparam logic [DATA_WIDTH-1:0] KA[NK] = '{MX, MN, MN, MX, ONES, MN};
-  localparam logic [DATA_WIDTH-1:0] KB[NK] = '{ONE, ONES, MN, MX, ONE, MX};
-  localparam logic [DATA_WIDTH-1:0] KR[NK] = '{MN, MX, '0, ONES - ONE, '0, ONES};
-  localparam int NC = 14;
-  localparam logic [DATA_WIDTH-1:0] CORNER[NC] = '{'0, ONE, ONES, ONE + ONE, ONES - ONE, MX, MN, MX - ONE, MN + ONE, {(DATA_WIDTH / 2) {2'b01}},
+  localparam int KNOWN_COUNT = 6;
+  localparam logic [DATA_WIDTH-1:0] KNOWN_A[KNOWN_COUNT] = '{MAX_VALUE, MIN_VALUE, MIN_VALUE, MAX_VALUE, ONES, MIN_VALUE};
+  localparam logic [DATA_WIDTH-1:0] KNOWN_B[KNOWN_COUNT] = '{ONE, ONES, MIN_VALUE, MAX_VALUE, ONE, MAX_VALUE};
+  localparam logic [DATA_WIDTH-1:0] KNOWN_SUM[KNOWN_COUNT] = '{MIN_VALUE, MAX_VALUE, '0, ONES - ONE, '0, ONES};
+  localparam int CORNER_COUNT = 14;
+  localparam logic [DATA_WIDTH-1:0] CORNER[CORNER_COUNT] = '{'0, ONE, ONES, ONE + ONE, ONES - ONE, MAX_VALUE, MIN_VALUE, MAX_VALUE - ONE, MIN_VALUE + ONE, {(DATA_WIDTH / 2) {2'b01}},
                                           {(DATA_WIDTH / 2) {2'b10}}, ONES >> (DATA_WIDTH / 2), ONES << (DATA_WIDTH / 2), ONE << (DATA_WIDTH / 2)};
 
   logic clk = 0, rstn = 0;
@@ -42,9 +42,9 @@ module TB_int32Adder #(
   endfunction
 
   task automatic build_stimulus();
-    for (int i = 0; i < NK; i++) push(KA[i], KB[i]);
-    for (int i = 0; i < NC; i++)
-      for (int j = 0; j < NC; j++) push(CORNER[i], CORNER[j]);
+    for (int i = 0; i < KNOWN_COUNT; i++) push(KNOWN_A[i], KNOWN_B[i]);
+    for (int i = 0; i < CORNER_COUNT; i++)
+      for (int j = 0; j < CORNER_COUNT; j++) push(CORNER[i], CORNER[j]);
     for (int k = 0; k < DATA_WIDTH; k++) begin  // carries rippling through k bits, borrows through the top, every power of two doubled
       push((ONE << k) - ONE, ONE);
       push(ONES << k, ONES);
@@ -52,7 +52,7 @@ module TB_int32Adder #(
     end
     for (int n = 0; n < RANDOM; n++)
       if (n % 4 == 0)
-        push($urandom_range(0, 1) ? MX - DATA_WIDTH'($urandom_range(0, 255)) : MN + DATA_WIDTH'($urandom_range(0, 255)),
+        push($urandom_range(0, 1) ? MAX_VALUE - DATA_WIDTH'($urandom_range(0, 255)) : MIN_VALUE + DATA_WIDTH'($urandom_range(0, 255)),
              DATA_WIDTH'($signed(9'($urandom_range(0, 511)))));  // within 255 of a rail, a step of -256..255
       else push(DATA_WIDTH'($urandom), DATA_WIDTH'($urandom));
   endtask
@@ -100,8 +100,8 @@ module TB_int32Adder #(
   end
 
   initial begin
-    for (int i = 0; i < NK; i++)
-      if (DATA_WIDTH'(c_int_add(int'(KA[i]), int'(KB[i]), DATA_WIDTH)) !== KR[i]) $fatal(1, "TB_int32Adder: the C reference fails known sum %0d", i);
+    for (int i = 0; i < KNOWN_COUNT; i++)
+      if (DATA_WIDTH'(c_int_add(int'(KNOWN_A[i]), int'(KNOWN_B[i]), DATA_WIDTH)) !== KNOWN_SUM[i]) $fatal(1, "TB_int32Adder: the C reference fails known sum %0d", i);
     if ($value$plusargs("DUMP=%s", dump)) fd = $fopen(dump, "w");
     build_stimulus();
     repeat (8) @(posedge clk);

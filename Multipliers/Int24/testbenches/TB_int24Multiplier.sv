@@ -6,9 +6,9 @@ module TB_int24Multiplier #(
 );
   localparam int DATA_WIDTH = 24;
   import "DPI-C" function longint c_int_mul_wide(input longint a, input longint b, input int w);
-  localparam logic [DATA_WIDTH-1:0] MX = {1'b0, {(DATA_WIDTH - 1) {1'b1}}};
-  localparam logic [DATA_WIDTH-1:0] MN = {1'b1, {(DATA_WIDTH - 1) {1'b0}}};
-  localparam int NC = 11;
+  localparam logic [DATA_WIDTH-1:0] MAX_VALUE = {1'b0, {(DATA_WIDTH - 1) {1'b1}}};
+  localparam logic [DATA_WIDTH-1:0] MIN_VALUE = {1'b1, {(DATA_WIDTH - 1) {1'b0}}};
+  localparam int CORNER_COUNT = 11;
 
   logic clk = 0, rstn = 0;
   always #5 clk = ~clk;
@@ -90,18 +90,18 @@ module TB_int24Multiplier #(
         end
       n_expect = longint'(1) << (2 * DATA_WIDTH);
     end else begin  // every pair of corner values, then RANDOM random pairs
-      logic [DATA_WIDTH-1:0] cv[NC];
-      cv = '{'0, DATA_WIDTH'(1), '1, DATA_WIDTH'(2), DATA_WIDTH'(-2), MX, MN, MX - DATA_WIDTH'(1), MN + DATA_WIDTH'(1), {(DATA_WIDTH / 2) {2'b01}}, {(DATA_WIDTH / 2) {2'b10}}};
-      foreach (cv[i])
-        foreach (cv[j]) begin
-          drive(cv[i], cv[j]);
+      logic [DATA_WIDTH-1:0] corner_values[CORNER_COUNT];
+      corner_values = '{'0, DATA_WIDTH'(1), '1, DATA_WIDTH'(2), DATA_WIDTH'(-2), MAX_VALUE, MIN_VALUE, MAX_VALUE - DATA_WIDTH'(1), MIN_VALUE + DATA_WIDTH'(1), {(DATA_WIDTH / 2) {2'b01}}, {(DATA_WIDTH / 2) {2'b10}}};
+      foreach (corner_values[i])
+        foreach (corner_values[j]) begin
+          drive(corner_values[i], corner_values[j]);
           if ($urandom_range(0, 7) == 0) idle();
         end
       for (int n = 0; n < RANDOM; n++) begin
         drive(DATA_WIDTH'($urandom), DATA_WIDTH'($urandom));
         if ($urandom_range(0, 7) == 0) idle();
       end
-      n_expect = NC * NC + RANDOM;
+      n_expect = CORNER_COUNT * CORNER_COUNT + RANDOM;
     end
     #1 valid = 0;
     repeat (20) @(posedge clk);
