@@ -12,10 +12,11 @@ pkg:
 	$(PRJ_DIR)/Verilator/pkg/sim
 
 # the define map under each define (pkg_fp32 also with no define, which must be fp32): TB_sienna_fmt_map against the spec's table
+UNIT_SRC ?= $(PRJ_DIR)/src/sienna_fmt_pkg.sv  # pkg_mutant points it at a faulted copy
 define map_run
-	verilator $(FLAGS) $(2) --top-module TB_sienna_fmt_map --Mdir $(PRJ_DIR)/Verilator/map_$(1) $(PRJ_DIR)/src/sienna_fmt_pkg.sv \
+	verilator $(FLAGS) $(2) --top-module TB_sienna_fmt_map --Mdir $(or $(BENCH_DIR),$(PRJ_DIR)/Verilator/map_$(1)) $(UNIT_SRC) \
 	  $(TB_DIR)/TB_sienna_fmt_map.sv -o sim
-	$(PRJ_DIR)/Verilator/map_$(1)/sim
+	$(or $(BENCH_DIR),$(PRJ_DIR)/Verilator/map_$(1))/sim
 endef
 pkg_fp32:
 	$(call map_run,fp32,+define+FMT_FP32)
@@ -24,6 +25,11 @@ pkg_bf16:
 	$(call map_run,bf16,+define+FMT_BF16)
 pkg_int8:
 	$(call map_run,int8,+define+FMT_INT8)
+
+# the planted fault of testbenches/pkg_mutant.sed (int8 RESULT_DATA_WIDTH 16) against TB_sienna_fmt_map: passes only when the bench fails
+UNIT_MAKE = $(MAKE)  # a recipe line naming $(MAKE) would run under make -n
+pkg_mutant:
+	@bash $(PRJ_DIR)/unit_mutant.sh int8_result_width_16 $(PRJ_DIR)/src/sienna_fmt_pkg.sv $(TB_DIR)/pkg_mutant.sed $(UNIT_MAKE) -s --no-print-directory pkg_int8
 
 FP32_UNITS = $(ARIL)/Multipliers/Radix4Booth/src/R4Booth.sv $(ARIL)/Multipliers/Karatsuba/src/karatsubaUnsigned.sv \
              $(ARIL)/Multipliers/FP32/src/fp32Multiplier.sv $(ARIL)/Adders/FP32/src/LZC.sv $(ARIL)/Adders/FP32/src/fp32Adder.sv
@@ -97,4 +103,4 @@ $(CREDIT_FATALS): credit_fatal_%:
 	line=$$(command grep -m1 -F "$$want" $$log); \
 	[ -n "$$line" ] && echo "credit OK: MODE=$$m fired: $$line" || { echo "credit FAIL: MODE=$$m: no '$$want'"; tail -20 $$log; exit 1; }
 
-.PHONY: pkg pkg_fp32 pkg_bf16 pkg_int8 dump32 ipu fpu truth credit credit_lint $(CREDIT_RUNS) $(CREDIT_FATALS)
+.PHONY: pkg pkg_fp32 pkg_bf16 pkg_int8 pkg_mutant dump32 ipu fpu truth credit credit_lint $(CREDIT_RUNS) $(CREDIT_FATALS)
