@@ -43,3 +43,17 @@ static inline uint32_t fpref_op(int op, uint32_t a, uint32_t b, int man_w, int *
   *flags = softfloat_exceptionFlags;
   return fpref_narrow(fr.v, man_w, flags);
 }
+
+// The exact fp32 product of two narrower floats (bf16WideMultiplier): widened, multiplied to nearest even (exact unless it overflows or
+// is tiny), then the units' policy at 23 mantissa bits (tiny flushed to a signed zero, NaN canonical).
+static inline uint32_t fpref_mul_wide(uint32_t a, uint32_t b, int man_w, int *flags) {
+  float32_t fa, fb, fr;
+  fa.v = fpref_widen(a, man_w);
+  fb.v = fpref_widen(b, man_w);
+  softfloat_roundingMode = softfloat_round_near_even;
+  softfloat_detectTininess = softfloat_tininess_beforeRounding;
+  softfloat_exceptionFlags = 0;
+  fr = f32_mul(fa, fb);
+  *flags = softfloat_exceptionFlags;
+  return fpref_narrow(fr.v, 23, flags);
+}

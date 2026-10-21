@@ -9,3 +9,7 @@ extern "C" int c_fp_mul(int a, int b, int man_w, int *flags) {
 extern "C" int c_fp_add(int a, int b, int man_w, int *flags) {
   return (int)fpref_op(1, (uint32_t)a, (uint32_t)b, man_w, flags);
 }
+
+extern "C" int c_fp_mul_wide(int a, int b, int man_w, int *flags) {
+  return (int)fpref_mul_wide((uint32_t)a, (uint32_t)b, man_w, flags);
+}
