@@ -1,0 +1,21 @@
+# name|fmt|kind|file (src/<f>, pkg: sienna_fmt_pkg.sv, tops: fmt_tops.sv)|sed expression|DATA_WIDTH EXT_DATA_WIDTH (blank: the defaults)|y: TB_fmt and the
+# true-function sweep must both fail, n: TB_fmt, s: the sweep only (the units with no wrapper)
+add_is_mul|bf16|add|src/fmt_add.sv|s/    fp32Adder ADD/    fp32Multiplier ADD/||y
+mul_widen_lat|bf16|mul|pkg|s/localparam int MUL_LATENCY = 3;  \/\/ bf16WideMultiplier/localparam int MUL_LATENCY = 4;/|16 32|n
+mul_lane_lat|fp32|mul|pkg|s/localparam int LANE_MUL_LATENCY = 8;/localparam int LANE_MUL_LATENCY = 7;/||n
+add_lat_int8|int8|add|pkg|s/localparam int ADD_LATENCY = 1;  \/\/ fmt_add: int32Adder/localparam int ADD_LATENCY = 2;/||n
+mul_widen_lane|bf16|mul|src/fmt_mul.sv|s/end else if (EXT_DATA_WIDTH == 32) begin : G_WIDEN/end else if (EXT_DATA_WIDTH == 64) begin : G_WIDEN/|16 32|y
+mul_int8_zext|int8|mul|src/fmt_mul.sv|s/assign product_o = EXT_DATA_WIDTH'(int8_product);/assign product_o = EXT_DATA_WIDTH'($unsigned(int8_product));/|8 32|y
+cmp_reversed|bf16|cmp|pkg|s/  if (!a\[DATA_WIDTH-1\]) return a\[DATA_WIDTH-2:0\] > b\[DATA_WIDTH-2:0\];/  if (!a[DATA_WIDTH-1]) return a[DATA_WIDTH-2:0] < b[DATA_WIDTH-2:0];/||y
+relu_int8_identity|int8|relu|pkg|s/  return (\$signed(x) < \$signed(zero_point)) ? zero_point : x;/  return x;/||y
+relu_float_signed|fp32|relu|pkg|s/  return x\[DATA_WIDTH-1\] ? '0 : x;/  return x;/||y
+mul_fp32_is_add|fp32|mul|src/fmt_mul.sv|s/    fp32Multiplier MUL (/    fp32Adder MUL (/||y
+mul_int8_is_int16|int8|mul|src/fmt_mul.sv|s/    int8Multiplier MUL (/    int16Multiplier MUL (/|8 32|y
+add_lane_bf16_is_mul|bf16|add|src/fmt_add.sv|s/    bf16Adder ADD (/    bf16Multiplier ADD (/|16|y
+add_lane_lat_bf16|bf16|add|pkg|s/localparam int LANE_ADD_LATENCY = 5;  \/\/ bf16Adder/localparam int LANE_ADD_LATENCY = 4;/|16|n
+mul_mesh_lat_int8|int8|mul|pkg|s/localparam int MUL_LATENCY = 1;  \/\/ mesh product: int8Multiplier/localparam int MUL_LATENCY = 2;/|8 32|n
+requantize_shift_plus_one|int8|requantize|tops|s/.shift_i(params_i.shift),/.shift_i(params_i.shift + 6'd1),/||s
+requantize_zero_point_ignored|int8|requantize|tops|s/.zp_i(params_i.zero_point)/.zp_i(8'sd0)/||s
+quantized_add_in1_zero_point_ignored|int8|quantized_add|tops|s/.zp1_i(params_i.in1_zero_point)/.zp1_i(8'sd0)/||s
+quantized_add_in2_mantissa_dropped|int8|quantized_add|tops|s/.m2_i(params_i.in2_mantissa)/.m2_i(32'd0)/||s
+narrow_truncates|bf16|narrow|tops|s/fp32ToBf16 NARROW (.fp32_i(x_i), .bf16_o(y_o));/assign y_o = x_i[31:16];/||s
