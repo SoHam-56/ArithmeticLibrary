@@ -62,7 +62,7 @@ help:
 	@echo "  make lint-baseline    - re-record each point's existing-file warnings in testbenches/lint_baseline.txt; refused when an existing"
 	@echo "                        file changed since the last record (FORCE=1 re-records anyway)"
 	@echo "  make all_<fmt>        - every point of one format"
-	@echo "  make truefn | fmt_pkg | check_fmt | controls | mutants"
+	@echo "  make truefn | fmt_pkg | check_fmt | controls | mutants | lint_tops"
 	@echo "  make exhaustive FMT=<f> - the unit sweeps of the gate table (sweep.py; every core)"
 	@echo "  make sweep-build KIND=<k> FMT=<f> [DATA_WIDTH=<n>] [EXT_DATA_WIDTH=<n>] [RULE=lane] - one sweep harness (kinds: mul add cmp relu narrow"
 	@echo "                        requantize quantized_add; RULE=lane judges fmt_add by the lane rule at any width)"
@@ -83,7 +83,15 @@ endef
 field = $(subst ~, ,$(word $(2),$(subst |, ,$(1))))
 $(foreach p,$(POINTS),$(eval $(call point,$(call field,$(p),1),$(call field,$(p),2),$(call field,$(p),3),$(call field,$(p),4),$(call field,$(p),5))))
 
-LB_POINTS ?= $(POINT_NAMES)
+# the test tops TB_fmt does not drive, linted per define as the points are (0 library warnings): fmt_fn_narrow in fp32 and bf16, the int8 units' tops
+TOP_LINTS = narrow_fp32:fp32:narrow narrow_bf16:bf16:narrow requantize_int8:int8:requantize quantized_add_int8:int8:quantized_add
+lint_tops:
+	@rc=0; for t in $(TOP_LINTS); do IFS=: read -r n f k <<< "$$t"; top=fmt_fn_$$k; log=$(V)/lint_$$n.log; \
+	  verilator --lint-only -Wall -Wno-fatal -DSYNTHESIS +define+FMT_$$(echo $$f | tr a-z A-Z) $(INC) --top-module $$top $(SRC) > $$log 2>&1 || rc=1; \
+	  $(PYTHON) $(PRJ_DIR)/lint_gate.py $$log $$n $$top $(if $(RECORD),--record) $(if $(FORCE),--force) --baseline $(LINT_BASELINE) $(LINT_GATE_ARGS) || rc=1; \
+	done; exit $$rc
+
+LB_POINTS ?= $(POINT_NAMES) lint_tops
 C6_MAKE = $(MAKE)  # a recipe line naming $(MAKE) runs under make -n; this one only prints
 
 points:
@@ -190,9 +198,11 @@ controls:
 mutants:
 	@caught=0; total=0; while IFS='|' read -r name f kind file expr sizes sw; do case "$$name" in ''|'#'*) continue;; esac; total=$$((total + 1)); \
 	  d=$(V)/mut_$$name; rm -rf $$d; mkdir -p $$d/src $$d/pkg $$d/tops; cp $(PRJ_DIR)/src/*.sv $$d/src/; cp $(PKG) $$d/pkg/; cp $(TOPS) $$d/tops/; \
-	  case "$$file" in pkg) tgt=$$d/pkg/sienna_fmt_pkg.sv;; tops) tgt=$$d/tops/fmt_tops.sv;; *) tgt=$$d/$$file;; esac; \
+	  urel=""; case "$$file" in pkg) tgt=$$d/pkg/sienna_fmt_pkg.sv;; tops) tgt=$$d/tops/fmt_tops.sv;; \
+	    unit:*) urel=$${file#unit:}; mkdir -p $$d/unit; tgt=$$d/unit/$$(basename $$urel); cp $(ARIL)/$$urel $$tgt;; *) tgt=$$d/$$file;; esac; \
 	  cp $$tgt $$tgt.orig; sed -i "$$expr" $$tgt; if cmp -s $$tgt $$tgt.orig; then echo "mutant $$name FAIL: the sed changed nothing"; exit 1; fi; \
 	  src="$$d/pkg/sienna_fmt_pkg.sv $(UNITS) $(GENERIC) $(EQ_ONLY) $$d/src/fmt_mul.sv $$d/src/fmt_add.sv $$d/tops/fmt_tops.sv"; F=$$(echo $$f | tr a-z A-Z); \
+	  if [ -n "$$urel" ]; then n=""; for w in $$src; do [ "$$w" = "$(ARIL)/$$urel" ] && w=$$tgt; n="$$n $$w"; done; src=$$n; fi; \
 	  set -- $$sizes; tbg=""; swg=""; pw=""; \
 	  if [ -n "$$1" ]; then case $$kind in \
 	    mul) tbg="-GMUL_DATA_WIDTH=$$1 -GMUL_EXT_DATA_WIDTH=$$2"; swg="-GDATA_WIDTH=$$1 -GEXT_DATA_WIDTH=$$2"; pw="--data-width $$1 --ext-data-width $$2";; \
@@ -260,5 +270,5 @@ equiv_quick:
 clean:
 	rm -rf $(V) $(PRJ_DIR)/results
 
-.PHONY: help points lint-baseline all_fp32 all_bf16 all_int8 truefn fmt_pkg check_fmt controls mutants sweep-build exhaustive eq-build equiv equiv_quick clean \
+.PHONY: help points lint_tops lint-baseline all_fp32 all_bf16 all_int8 truefn fmt_pkg check_fmt controls mutants sweep-build exhaustive eq-build equiv equiv_quick clean \
         $(POINT_NAMES)

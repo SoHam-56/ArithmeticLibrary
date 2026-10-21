@@ -1,4 +1,4 @@
-# name|fmt|kind|file (src/<f>, pkg: sienna_fmt_pkg.sv, tops: fmt_tops.sv)|sed expression|DATA_WIDTH EXT_DATA_WIDTH (blank: the defaults)|y: TB_fmt and the
+# name|fmt|kind|file (src/<f>, pkg: sienna_fmt_pkg.sv, tops: fmt_tops.sv, unit:<path>: a unit's source)|sed expression|DATA_WIDTH EXT_DATA_WIDTH (blank: the defaults)|y: TB_fmt and the
 # true-function sweep must both fail, n: TB_fmt, s: the sweep only (the units with no wrapper)
 add_is_mul|bf16|add|src/fmt_add.sv|s/    fp32Adder ADD/    fp32Multiplier ADD/||y
 mul_widen_lat|bf16|mul|pkg|s/localparam int MUL_LATENCY = 3;  \/\/ bf16WideMultiplier/localparam int MUL_LATENCY = 4;/|16 32|n
@@ -19,3 +19,5 @@ requantize_zero_point_ignored|int8|requantize|tops|s/.zp_i(params_i.zero_point)/
 quantized_add_in1_zero_point_ignored|int8|quantized_add|tops|s/.zp1_i(params_i.in1_zero_point)/.zp1_i(8'sd0)/||s
 quantized_add_in2_mantissa_dropped|int8|quantized_add|tops|s/.m2_i(params_i.in2_mantissa)/.m2_i(32'd0)/||s
 narrow_truncates|bf16|narrow|tops|s/fp32ToBf16 NARROW (.fp32_i(x_i), .bf16_o(y_o));/assign y_o = x_i[31:16];/||s
+bf16_multiplier_one_ulp_low|bf16|mul|unit:Multipliers/BF16/src/bf16Multiplier.sv|s/        end else result_o <= {class_at_product.sign, result_exponent, result_mantissa};/        end else result_o <= {class_at_product.sign, result_exponent, result_mantissa} - DATA_WIDTH'(result_mantissa != '0);/|16 16|s
+bf16_adder_one_ulp_low|bf16|add|unit:Adders/BF16/src/bf16Adder.sv|s/        else result_o <= {s4_class.sign, normalized_exponent\[EXPONENT_WIDTH-1:0\], normalized_mantissa\[ALIGNED_WIDTH-2-:MANTISSA_WIDTH\]};/        else result_o <= {s4_class.sign, normalized_exponent[EXPONENT_WIDTH-1:0], normalized_mantissa[ALIGNED_WIDTH-2-:MANTISSA_WIDTH]} - DATA_WIDTH'(normalized_mantissa[ALIGNED_WIDTH-2-:MANTISSA_WIDTH] != '0);/|16|s
