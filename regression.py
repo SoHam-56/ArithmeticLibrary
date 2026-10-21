@@ -50,6 +50,29 @@ NEW_UNITS = (("Multipliers/BF16", "bf16Multiplier", "verilator"), ("Adders/BF16"
              ("Multipliers/Int24", "int24Multiplier", "verilator"), ("Adders/Int32", "int32Adder", "verilator"))  # the per-format units
 POINTS += [(u, t, TB + (rf"^{top}: \d+ .* 0 errors", ), TB_BAD, True) for u, top, t in NEW_UNITS]  # each on its direct reference bench
 POINTS += [(u, "lint", (rf"^lint {top}: 0 warnings, 0 errors$",), LINT_BAD, True) for u, top, _ in NEW_UNITS]  # lint clean; make -C Fmt equiv
+FMT_POINTS = ("mul_fp32", "mul_bf16_o16", "mul_bf16_o32", "mul_int8_o16", "mul_int8_o32", "add_fp32", "add_bf16", "add_bf16_w16", "add_int8",
+              "cmp_fp32", "cmp_bf16", "cmp_int8", "relu_fp32", "relu_bf16", "relu_int8")  # fmt_mul and fmt_add at every width, fmt_greater_than and fmt_relu, per define
+POINTS += [("Fmt", p, TB + (rf"^lint \S+ {p}: 0 library warnings, 0 new unit warnings \(\d+ in the recorded baseline\), 0 unplaced warnings, 0 errors$",), TB_BAD, True)
+           for p in FMT_POINTS]  # lint clean: no warning in new code, none beyond the recorded baseline in the existing units
+POINTS += [
+    ("Fmt", "truefn", TB + (r"^truefn selftest: \d+ checks, 0 failures$", r"^test_truefn: \d+ checks, 0 failures$",
+                            r"^sweep selftest: \d+ checks, 0 failures$"), TB_BAD, True),
+    ("Fmt", "fmt_pkg", TB + (r"^fmt_pkg selftest: \d+ checks, 0 failures$",), TB_BAD, True),
+    ("Fmt", "check_fmt", (r"^check_fmt OK: the tree passes$", r"^check_fmt OK: C4 "), (r"check_fmt FAIL",), True),
+    ("Fmt", "controls", (r"^controls OK: FMT=fp16 stops make$", r"^controls OK: FMT_INT8 with FMT_BF16 ", r"^controls OK: FMT_INT8 with FMT_FP32 ",
+                         r"^controls OK: FMT_BF16 with FMT_FP32 ", r"^controls OK: the elaboration check repeats it$", r"^controls OK: no define elaborates fp32$",
+                         r"^controls OK: a sweep harness missing WRAPPER_DATA_WIDTH does not build$",
+                         r"^controls OK: a sweep harness missing EXT_DATA_WIDTH does not build$", r"^controls OK: a misdecoded sweep fails: FAIL \(every gated row is decided by the floor\) ",
+                         r"^controls OK: a warning planted in existing code fails the lint gate: NEW WARNING ",
+                         r"^controls OK: a warning planted in new code fails the lint gate: NEW WARNING ",
+                         r"^controls OK: a %Warning line with no location fails the lint gate$",
+                         r"^controls OK: make lint-baseline refuses to re-record over a changed existing file$")
+     + tuple(rf"^controls OK: {w} refused$" for w in ("fp32 fmt_mul -GDATA_WIDTH=16", "bf16 fmt_mul -GEXT_DATA_WIDTH=24", "int8 fmt_mul -GDATA_WIDTH=16",
+                                                     "int8 fmt_mul -GEXT_DATA_WIDTH=12", "bf16 fmt_add -GDATA_WIDTH=8", "int8 fmt_add -GDATA_WIDTH=8")),
+     (r"controls FAIL",), True),
+    ("Fmt", "mutants", (r"^mutants: (\d+) of \1 caught$",), (r"SURVIVED",), False),  # its lines quote the failures the mutants provoke
+    ("Fmt", "equiv_quick", TB + (r"^EQUIV: 10 of 10 pairs equal$",), TB_BAD, True),  # make -C Fmt equiv is the proof; this runs its harness on a slice
+]
 CREDIT_OK = 11  # TB_credit_link: 8 (STAGES, MODE) runs and 3 $fatal modes, one 'credit OK' line each
 LINT_RUNS = {"Adders/FP/lint": 2, "Adders/Int/lint": 1, "Multipliers/FP/lint": 2, "Multipliers/Int/lint": 2, "Multipliers/Fx/lint": 1,
              "Requantizer/lint": 2, "QuantizedAdder/lint": 2}  # Common/lint.sh lines each lint prints, one per configuration
@@ -233,14 +256,18 @@ def test_points_and_commands():
         raise AssertionError("parse accepted Adders/FP/nosuch")
 
 
+NO_POINT_SRC = ("Divider/FP32", "Multipliers/Radix4Booth")  # sources with no bench of their own: fp32Divider (GPNAE's Taylor lane), R4Booth (in Karatsuba's)
+
+
 @selftest
 def test_every_unit_has_points():
-    """Every unit directory with a Makefile appears in POINTS, so a new unit cannot be left out of make regression."""
+    """Every unit directory with a Makefile or a src/ directory appears in POINTS, so a new unit cannot be left out of make regression."""
     mk = glob.glob(os.path.join(ROOT, "*", "Makefile")) + glob.glob(os.path.join(ROOT, "*", "*", "Makefile"))
-    units = sorted(os.path.relpath(os.path.dirname(p), ROOT) for p in mk)
+    src = glob.glob(os.path.join(ROOT, "*", "src")) + glob.glob(os.path.join(ROOT, "*", "*", "src"))
+    units = sorted({os.path.relpath(os.path.dirname(p), ROOT) for p in mk + src} - set(NO_POINT_SRC))
     listed = {u for u, *_ in POINTS}
     missing = [u for u in units if u not in listed]
-    assert len(units) >= 13 and not missing, f"units without a make regression point: {missing}"
+    assert len(units) >= 22 and not missing, f"units without a make regression point: {missing}"
 
 
 @selftest
@@ -250,6 +277,54 @@ def test_every_new_unit_has_its_bench():
         assert f"{u}/{t}" in TABLE and f"{u}/lint" in TABLE, u
         assert SPEC.verdict(f"{u}/{t}", f"{top}: 10 vectors against the reference, 0 errors\nRESULT: PASSED\n", 0) == "PASS", u
         assert SPEC.verdict(f"{u}/{t}", f"{top}: 10 vectors against the reference, 3 errors\nRESULT: FAILED\n", 0) != "PASS", u
+
+
+@selftest
+def test_fmt_points_match_the_makefile():
+    """FMT_POINTS is Fmt/Makefile's point list (make -C Fmt points), so a point added there cannot be left out of make regression."""
+    r = subprocess.run(["make", "-s", "--no-print-directory", "-C", os.path.join(ROOT, "Fmt"), "points"], capture_output=True, text=True,
+                       env={k: v for k, v in os.environ.items() if not k.startswith("MAKE")})
+    mk = r.stdout.split()
+    assert r.returncode == 0 and mk, r.stderr[-200:]
+    assert list(FMT_POINTS) == mk, (sorted(set(mk) - set(FMT_POINTS)), sorted(set(FMT_POINTS) - set(mk)))
+
+
+CONTROL_LINES = """controls OK: FMT=fp16 stops make
+controls OK: FMT_INT8 with FMT_BF16 stops the preprocessor
+controls OK: FMT_INT8 with FMT_FP32 stops the preprocessor
+controls OK: FMT_BF16 with FMT_FP32 stops the preprocessor
+controls OK: the elaboration check repeats it
+controls OK: no define elaborates fp32
+controls OK: a sweep harness missing WRAPPER_DATA_WIDTH does not build
+controls OK: a sweep harness missing EXT_DATA_WIDTH does not build
+controls OK: a misdecoded sweep fails: FAIL (every gated row is decided by the floor) (n 16777216 miss 0, floor_only 16777216)
+controls OK: a warning planted in existing code fails the lint gate: NEW WARNING add_fp32: %Warning-UNUSEDSIGNAL: Adders/FP32/src/fp32Adder.sv:266
+controls OK: a warning planted in new code fails the lint gate: NEW WARNING add_fp32: %Warning-UNUSEDSIGNAL: Fmt/src/fmt_add.sv:45
+controls OK: a %Warning line with no location fails the lint gate
+controls OK: make lint-baseline refuses to re-record over a changed existing file
+controls OK: fp32 fmt_mul -GDATA_WIDTH=16 refused
+controls OK: bf16 fmt_mul -GEXT_DATA_WIDTH=24 refused
+controls OK: int8 fmt_mul -GDATA_WIDTH=16 refused
+controls OK: int8 fmt_mul -GEXT_DATA_WIDTH=12 refused
+controls OK: bf16 fmt_add -GDATA_WIDTH=8 refused
+controls OK: int8 fmt_add -GDATA_WIDTH=8 refused
+"""  # make -C Fmt controls (lane C's run rs3_r6_n1_green), the planted-warning lines cut short
+
+
+@selftest
+def test_every_control_is_required():
+    """Fmt/controls passes only with every control's OK line, and every 'controls OK' echo in Fmt/Makefile has a line here."""
+    v = SPEC.verdict
+    assert v("Fmt/controls", CONTROL_LINES, 0) == "PASS"
+    lines = CONTROL_LINES.splitlines(keepends=True)
+    kept = [ln for i, ln in enumerate(lines) if v("Fmt/controls", "".join(lines[:i] + lines[i + 1:]), 0) == "PASS"]
+    assert not kept, f"controls passes without: {kept}"
+    other = CONTROL_LINES.replace("FAIL (every gated row is decided by the floor)", "FAIL (3 misses beyond the bound)")
+    assert v("Fmt/controls", other, 0) != "PASS", "the misdecode control passes on a FAIL other than its floor-decided one"
+    mk = open(os.path.join(ROOT, "Fmt", "Makefile")).read()
+    for echo in re.findall(r'echo "controls OK: ([^"$]*)', mk):
+        assert any(ln.startswith("controls OK: " + echo) for ln in lines), f"no control line for the echo 'controls OK: {echo}'"
+    assert len(re.findall(r"\$\(call bad_width,", mk)) == sum(ln.endswith(" refused\n") for ln in lines)
 
 
 @selftest
