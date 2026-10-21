@@ -157,6 +157,24 @@ package sienna_fmt_pkg;
     logic [7:0]  act_min;
     logic [7:0]  act_max;
   } add_params_t;
+  // One pack entry's words in SIENNA's sideband and layer configuration: the requantize output zero point and clamp, then the lane's
+  // input rescale and SELU output requantize (the lane's input zero point is zero_point, or the ADD's out_zero_point after an ADD).
+  typedef struct packed {
+    logic [7:0]  zero_point;
+    logic [7:0]  act_min;
+    logic [7:0]  act_max;
+    logic [15:0] in_rescale_mantissa;
+    logic [4:0]  in_rescale_shift;
+    logic [23:0] selu_out_mantissa;
+    logic [5:0]  selu_out_shift;
+    logic [7:0]  selu_out_zero_point;
+  } lane_entry_t;
+  // One output channel's requantize scale, mantissa * 2^-shift (int8Requantizer's mult_i and shift_i).
+  typedef struct packed {
+    logic [23:0] mantissa;
+    logic [5:0]  shift;
+  } requant_scale_t;
+  localparam logic [DATA_WIDTH-1:0] DROPOUT_KEEP_SCALE = 8'h01;  // unused: int8 keeps x (DROPOUT_SCALE_LATENCY 0)
   // (base, degree) per activation, 10 bits each at [f*10 +: 10], f = 0 SELU, 1 sigmoid, 2 tanh (gpnae_poly_int8.sv:50-52).
   localparam logic [29:0] COEF_BASE_DEGREE_TABLE = {5'd16, 5'd3, 5'd9, 5'd3, 5'd0, 5'd2};
   // Group drain cycles per activation, 4 bits each at [f*4 +: 4]: LANE_MUL_LATENCY + 2, tanh LANE_MUL_LATENCY + fxMac's 2 + 3 (gpnae_poly_int8.sv:380).
@@ -189,6 +207,9 @@ package sienna_fmt_pkg;
   typedef logic lane_params_t;  // 1-bit dummies in floats
   typedef logic requant_params_t;
   typedef logic add_params_t;
+  typedef logic lane_entry_t;
+  typedef logic requant_scale_t;
+  localparam logic [DATA_WIDTH-1:0] DROPOUT_KEEP_SCALE = 16'h4000;  // 2.0: a kept word is x * 2, 1/(1 - p) at p = 50%
   // (base, degree) per activation, as gpnae_poly.sv:99-101.
   localparam logic [29:0] COEF_BASE_DEGREE_TABLE = {5'd16, 5'd8, 5'd9, 5'd6, 5'd0, 5'd8};
   // Only tanh drains, LANE_MUL_LATENCY + 2 cycles (gpnae_poly.sv:500).
@@ -221,6 +242,9 @@ package sienna_fmt_pkg;
   typedef logic lane_params_t;
   typedef logic requant_params_t;
   typedef logic add_params_t;
+  typedef logic lane_entry_t;
+  typedef logic requant_scale_t;
+  localparam logic [DATA_WIDTH-1:0] DROPOUT_KEEP_SCALE = 32'h40000000;  // 2.0
   localparam logic [29:0] COEF_BASE_DEGREE_TABLE = {5'd16, 5'd8, 5'd9, 5'd6, 5'd0, 5'd8};
   localparam logic [11:0] LANE_DRAIN_CYCLES_TABLE = {4'd10, 4'd0, 4'd0};
 `endif
@@ -254,6 +278,15 @@ package sienna_fmt_pkg;
     return ($signed(x) < $signed(zero_point)) ? zero_point : x;
 `else
     return x[DATA_WIDTH-1] ? '0 : x;
+`endif
+  endfunction
+
+  // Dropout's dropped word: floats a zero with x's sign, as x * 0 gives; int8 the output zero point, the code of 0.0.
+  function automatic logic [DATA_WIDTH-1:0] fmt_drop(input logic [DATA_WIDTH-1:0] x, input logic [DATA_WIDTH-1:0] zero_point);
+`ifdef FMT_INT8
+    return zero_point;
+`else
+    return {x[DATA_WIDTH-1], {(DATA_WIDTH - 1) {1'b0}}};
 `endif
   endfunction
   /* verilator lint_restore */
