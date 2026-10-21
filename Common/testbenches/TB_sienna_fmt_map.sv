@@ -1,7 +1,7 @@
 `timescale 1ns / 100ps
 
 // Checks sienna_fmt_pkg's define map under the build's define against the restructure spec's table, typed in here independently: the
-// precision constants, the bundles' widths, the lane constants and flat tables, the latency functions at each width, fmt_greater_than and fmt_relu; +define+NO_FMT_DEFINE
+// precision constants, the bundles' widths, the lane constants and flat tables, the latency functions at each width, fmt_greater_than, fmt_relu and fmt_drop; +define+NO_FMT_DEFINE
 // marks a build with no define, which must give fp32's values with FMT_DEFINE_COUNT 0.
 module TB_sienna_fmt_map;
   import sienna_fmt_pkg::*;
@@ -19,7 +19,8 @@ module TB_sienna_fmt_map;
   localparam string WANT_NAME = "int8";
   localparam int WANT[16] = '{8, 32, 32, 32, 16, 1, 1, 1, 0, 4, 6, 0, 0, 1, 1, 0};  // widths, latencies, POST_DECREMENT_PAD_CYCLES, the HAS_ flags
   localparam int WANT_LOWEST = 32'h80, WANT_ONE = 1;
-  localparam int WANT_BITS[3] = '{67, 54, 110};  // lane_params_t, requant_params_t, add_params_t
+  localparam int WANT_BITS[5] = '{67, 54, 110, 83, 30};  // lane_params_t, requant_params_t, add_params_t, lane_entry_t, requant_scale_t
+  localparam int WANT_KEEP = 1;  // DROPOUT_KEEP_SCALE, unused in int8
   localparam int WANT_LANE[4] = '{0, 7, 3, 1};  // EXPONENT_WIDTH, MANTISSA_WIDTH, HORNER_STEP_LATENCY, HORNER_COEFFICIENT_LAG
   localparam int WANT_BASE_DEGREE[6] = '{0, 2, 9, 3, 16, 3};  // (base, degree) of SELU, sigmoid, tanh
   localparam int WANT_DRAIN[3] = '{3, 3, 6};  // drain cycles of SELU, sigmoid, tanh
@@ -27,7 +28,8 @@ module TB_sienna_fmt_map;
   localparam string WANT_NAME = "bf16";
   localparam int WANT[16] = '{16, 32, 16, 16, 16, 3, 5, 3, 5, 0, 0, 3, 1, 0, 0, 0};
   localparam int WANT_LOWEST = 32'hFF80, WANT_ONE = 32'h3F80;
-  localparam int WANT_BITS[3] = '{1, 1, 1};
+  localparam int WANT_BITS[5] = '{1, 1, 1, 1, 1};
+  localparam int WANT_KEEP = 32'h4000;
   localparam int WANT_LANE[4] = '{8, 7, 8, 3};
   localparam int WANT_BASE_DEGREE[6] = '{0, 8, 9, 6, 16, 8};
   localparam int WANT_DRAIN[3] = '{0, 0, 5};
@@ -35,7 +37,8 @@ module TB_sienna_fmt_map;
   localparam string WANT_NAME = "fp32";
   localparam int WANT[16] = '{32, 32, 32, 32, 32, 8, 5, 8, 5, 0, 0, 8, 1, 0, 0, 1};
   localparam int WANT_LOWEST = 32'hFF800000, WANT_ONE = 32'h3F800000;
-  localparam int WANT_BITS[3] = '{1, 1, 1};
+  localparam int WANT_BITS[5] = '{1, 1, 1, 1, 1};
+  localparam int WANT_KEEP = 32'h40000000;
   localparam int WANT_LANE[4] = '{8, 23, 13, 8};
   localparam int WANT_BASE_DEGREE[6] = '{0, 8, 9, 6, 16, 8};
   localparam int WANT_DRAIN[3] = '{0, 0, 10};
@@ -73,6 +76,9 @@ module TB_sienna_fmt_map;
     expect_eq("$bits(lane_params_t)", int'($bits(lane_params_t)), WANT_BITS[0]);
     expect_eq("$bits(requant_params_t)", int'($bits(requant_params_t)), WANT_BITS[1]);
     expect_eq("$bits(add_params_t)", int'($bits(add_params_t)), WANT_BITS[2]);
+    expect_eq("$bits(lane_entry_t)", int'($bits(lane_entry_t)), WANT_BITS[3]);
+    expect_eq("$bits(requant_scale_t)", int'($bits(requant_scale_t)), WANT_BITS[4]);
+    expect_eq("DROPOUT_KEEP_SCALE", int'(DROPOUT_KEEP_SCALE), WANT_KEEP);
     expect_eq("EXPONENT_WIDTH", int'(EXPONENT_WIDTH), WANT_LANE[0]);
     expect_eq("MANTISSA_WIDTH", int'(MANTISSA_WIDTH), WANT_LANE[1]);
     expect_eq("HORNER_STEP_LATENCY", int'(HORNER_STEP_LATENCY), WANT_LANE[2]);
@@ -94,18 +100,24 @@ module TB_sienna_fmt_map;
     expect_eq("fmt_greater_than(-128, 127)", int'(fmt_greater_than(8'h80, 8'h7F)), 0);
     expect_eq("fmt_relu(-5, zp 3)", int'(fmt_relu(8'hFB, 8'd3)), 3);
     expect_eq("fmt_relu(9, zp 3)", int'(fmt_relu(8'd9, 8'd3)), 9);
+    expect_eq("fmt_drop(9, zp 3)", int'(fmt_drop(8'd9, 8'd3)), 3);
+    expect_eq("fmt_drop(-5, zp -128)", int'(fmt_drop(8'hFB, 8'h80)), 'h80);
 `elsif FMT_BF16
     expect_eq("fmt_greater_than(2.0, 1.0)", int'(fmt_greater_than(16'h4000, 16'h3F80)), 1);
     expect_eq("fmt_greater_than(-1.0, -2.0)", int'(fmt_greater_than(16'hBF80, 16'hC000)), 1);
     expect_eq("fmt_greater_than(+0, -0)", int'(fmt_greater_than(16'h0000, 16'h8000)), 0);
     expect_eq("fmt_relu(-3.0)", int'(fmt_relu(16'hC040, 16'h0)), 0);
     expect_eq("fmt_relu(3.0)", int'(fmt_relu(16'h4040, 16'h0)), 'h4040);
+    expect_eq("fmt_drop(-3.0)", int'(fmt_drop(16'hC040, 16'h0)), 'h8000);
+    expect_eq("fmt_drop(3.0)", int'(fmt_drop(16'h4040, 16'h1)), 0);
 `else
     expect_eq("fmt_greater_than(2.0, 1.0)", int'(fmt_greater_than(32'h40000000, 32'h3F800000)), 1);
     expect_eq("fmt_greater_than(-1.0, -2.0)", int'(fmt_greater_than(32'hBF800000, 32'hC0000000)), 1);
     expect_eq("fmt_greater_than(+0, -0)", int'(fmt_greater_than(32'h00000000, 32'h80000000)), 0);
     expect_eq("fmt_relu(-3.0)", int'(fmt_relu(32'hC0400000, 32'h0)), 0);
     expect_eq("fmt_relu(3.0)", int'(fmt_relu(32'h40400000, 32'h0)), 'h40400000);
+    expect_eq("fmt_drop(-3.0)", int'(fmt_drop(32'hC0400000, 32'h0)), 32'h80000000);
+    expect_eq("fmt_drop(3.0)", int'(fmt_drop(32'h40400000, 32'h1)), 0);
 `endif
     $display("sienna_fmt_pkg define map %s (%0d defines): %0d checks, %0d errors", FORMAT_NAME, FMT_DEFINE_COUNT, checks, errs);
     $display("RESULT: %s", errs == 0 ? "PASSED" : "FAILED");
