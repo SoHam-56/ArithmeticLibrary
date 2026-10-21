@@ -235,6 +235,7 @@ static inline uint64_t read_y(VTOP* t) {
 #endif
 }
 
+static double code_deviation = -1, code_relative = -1;  // requantize, quantized_add: the last row's |hw - t| in steps, and / |t| where the tolerance decides
 static bool ungated = false;  // the last judged vector has an input the kind does not gate (cmp, relu: a NaN operand)
 
 static inline Verdict judge(const Vec& v, uint64_t y) {
@@ -251,19 +252,22 @@ static inline Verdict judge(const Vec& v, uint64_t y) {
   return exact((y & 0xFFFFFFFF) == (v.a & 0xFFFFFFFF), 1.0);
 #endif
 #elif defined(KIND_REQUANTIZE) || defined(KIND_QUANTIZED_ADD)
-  const std::vector<int64_t>& p = PARAM_SETS[v.param_set];
+  const std::vector<int64_t>& set_words = PARAM_SETS[v.param_set];
 #if defined(KIND_REQUANTIZE)
-  const double zp = (double)p[3], lo = (double)p[4], hi = (double)p[5];
-  double tc = (double)sign_extend(v.a, 32) * real_of(p[0]) + zp;  // truth.requant_true: acc s + zp, float64
+  const double zero_point = (double)set_words[3], clamp_low = (double)set_words[4], clamp_high = (double)set_words[5];
+  double true_code = (double)sign_extend(v.a, 32) * real_of(set_words[0]) + zero_point;  // truth.requant_true: acc s + zp, float64
 #else
-  const double zp = (double)p[7], lo = (double)p[8], hi = (double)p[9];
-  double tc = (real_of(p[0]) * (double)(sign_extend(v.a, 8) - p[5]) + real_of(p[1]) * (double)(sign_extend(v.b, 8) - p[6])) / 1.0 + zp;  // truth.add_true, s_out 1
+  const double zero_point = (double)set_words[7], clamp_low = (double)set_words[8], clamp_high = (double)set_words[9];
+  double true_code = (real_of(set_words[0]) * (double)(sign_extend(v.a, 8) - set_words[5]) +
+                      real_of(set_words[1]) * (double)(sign_extend(v.b, 8) - set_words[6])) / 1.0 + zero_point;  // truth.add_true, s_out 1
 #endif
-  tc = tc < lo ? lo : tc > hi ? hi : tc;  // clamped to the output range
-  const double dev = fabs((double)sign_extend(y, 8) - tc), tz = fabs(tc - zp);  // |hw - t| and |t| in output steps
-  const bool ok = dev <= std::fmax(REL * tz, (double)I8_FLOOR);  // the floor of one step at every |t|
-  floor_only = ok && (tz <= I8_FLOOR || dev > REL * tz);
-  return {ok, dev <= I8_FLOOR ? 0.0 : (tz > 0 ? dev / tz : INFINITY)};
+  true_code = true_code < clamp_low ? clamp_low : true_code > clamp_high ? clamp_high : true_code;  // clamped to the output range
+  const double deviation = fabs((double)sign_extend(y, 8) - true_code), true_magnitude = fabs(true_code - zero_point);  // |hw - t|, |t| in steps
+  const bool ok = deviation <= std::fmax(REL * true_magnitude, (double)I8_FLOOR);  // the floor of one step at every |t|
+  floor_only = ok && (true_magnitude <= I8_FLOOR || deviation > REL * true_magnitude);
+  code_deviation = deviation;  // reported in steps over every row, and in percent of |t| where the tolerance decides
+  code_relative = (!floor_only && true_magnitude > 0) ? deviation / true_magnitude : -1;
+  return {ok, deviation <= I8_FLOOR ? 0.0 : (true_magnitude > 0 ? deviation / true_magnitude : INFINITY)};
 #elif defined(KIND_MUL)
   if (FLOATS && EXT_DATA_WIDTH == 32 && WRAPPER_DATA_WIDTH == 16) return float_rule(ftz(decode_word(v.a)) * ftz(decode_word(v.b)), f32v((uint32_t)y), FMAX32);  // the exact fp32 product
   if (FLOATS) return float_rule(ftz(decode_word(v.a)) * ftz(decode_word(v.b)), decode_word(y), FMAXD);
@@ -328,7 +332,7 @@ static inline uint64_t encode_word(double v) {  // a value as a DATA_W float wor
 }
 
 #if defined(KIND_REQUANTIZE)
-static const int64_t REQ_DENSE = 1 << 16, REQ_AIM = 640 * 8, REQ_RANDOM = 1 << 14;
+static const int64_t REQ_DENSE = 1 << 20, REQ_AIM = 640 * 8, REQ_RANDOM = 1 << 14;
 static const uint64_t REQ_N_DENSE = 2 * REQ_DENSE + 1, REQ_N_AIM = 3 * (2 * REQ_AIM + 1);
 static const int64_t REQ_ENDS[] = {INT32_MIN, INT32_MIN + 1, INT32_MAX - 1, INT32_MAX};
 static const uint64_t REQ_PER_SET = REQ_N_DENSE + REQ_N_AIM + REQ_RANDOM + 4;
@@ -544,19 +548,23 @@ int main(int argc, char** argv) {
   VerilatedContext* ctx = new VerilatedContext;
   VTOP* top = new VTOP{ctx};
   long long n = 0, miss = 0, lat_err = 0, cycles = 0;
-  double worst = -1;
+  double worst = -1, worst_steps = -1, worst_relative = -1;  // the last two for requantize and quantized_add only (-1 elsewhere)
+  long long relative_rows = 0;  // their rows the 1% tolerance decides
   Vec wv{};
   uint64_t wy = 0;
   std::vector<std::string> first;
   auto record = [&](const Vec& v, uint64_t y, uint64_t idx) {
     ungated = false;
     floor_only = false;
+    code_deviation = code_relative = -1;
     Verdict r = judge(v, y);
     n_ungated += ungated;
     n_floor_only += floor_only;
     n++;
     double e = std::isnan(r.e) ? INFINITY : r.e;
     if (e > worst) worst = e, wv = v, wy = y;
+    worst_steps = std::fmax(worst_steps, code_deviation);
+    if (code_relative >= 0) worst_relative = std::fmax(worst_relative, code_relative), relative_rows++;
     char buf[200];
     if (!r.ok) {
       miss++;
@@ -635,8 +643,9 @@ int main(int argc, char** argv) {
   if (sf) fclose(sf);
   for (auto& s : first) printf("%s\n", s.c_str());
   printf("SWEEP %s %s %s lo %" PRIu64 " first %" PRIu64 ": n %lld miss %lld worst %.6g at a %#" PRIx64 " b %#" PRIx64 " c %#" PRIx64 " param_set %d -> %#" PRIx64
-         " ungated %lld floor_only %lld latency_errors %lld cycles %lld data_width %d ext_data_width %d\n",
-         KIND, FMT_NAME, src.mode.c_str(), src.lo, first_i, n, miss, worst, wv.a, wv.b, wv.c, wv.param_set, wy, n_ungated, n_floor_only, lat_err, cycles,
+         " ungated %lld floor_only %lld latency_errors %lld cycles %lld worst_steps %.6g worst_relative %.6g relative_rows %lld data_width %d"
+         " ext_data_width %d\n",
+         KIND, FMT_NAME, src.mode.c_str(), src.lo, first_i, n, miss, worst, wv.a, wv.b, wv.c, wv.param_set, wy, n_ungated, n_floor_only, lat_err, cycles, worst_steps, worst_relative, relative_rows,
          (int)WRAPPER_DATA_WIDTH, (int)EXT_DATA_WIDTH);
   bool all_floor = n > n_ungated && n_floor_only == n - n_ungated;  // a log note only: sweep.py reads floor_only from the SWEEP line
   if (all_floor) printf("SWEEP_ALL_FLOOR %s %s: all %lld gated rows are decided by the floor\n", KIND, FMT_NAME, n - n_ungated);
