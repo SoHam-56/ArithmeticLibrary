@@ -222,8 +222,14 @@ def selftest():
           [("in1_zero_point", 8), ("in2_zero_point", 8), ("in1_mantissa", 32), ("in2_mantissa", 32), ("shift", 6), ("out_zero_point", 8),
            ("act_min", 8), ("act_max", 8)])
     check("int8 lane_params_t width (gp_* ports)", width("int8", "lane_params_t"), 16 + 5 + 8 + 24 + 6 + 8)
+    check("int8 lane_entry_t (SIENNA's per-entry words)", read("int8")["types"]["lane_entry_t"],
+          [("zero_point", 8), ("act_min", 8), ("act_max", 8), ("in_rescale_mantissa", 16), ("in_rescale_shift", 5), ("selu_out_mantissa", 24),
+           ("selu_out_shift", 6), ("selu_out_zero_point", 8)])
+    check("int8 requant_scale_t (a channel's scale)", read("int8")["types"]["requant_scale_t"], [("mantissa", 24), ("shift", 6)])
+    check("DROPOUT_KEEP_SCALE", [get(f, "DROPOUT_KEEP_SCALE") for f in FORMATS], [0x40000000, 0x4000, 1])
     for f in ("fp32", "bf16"):
-        check(f"{f} bundles are 1-bit dummies", [width(f, t) for t in ("lane_params_t", "requant_params_t", "add_params_t")], [1, 1, 1])
+        check(f"{f} bundles are 1-bit dummies", [width(f, t) for t in ("lane_params_t", "requant_params_t", "add_params_t", "lane_entry_t", "requant_scale_t")],
+              [1, 1, 1, 1, 1])
     check("COEF_BASE_DEGREE_TABLE floats", table("bf16", "COEF_BASE_DEGREE_TABLE", 10, 3), [(0 << 5) | 8, (9 << 5) | 6, (16 << 5) | 8])
     check("COEF_BASE_DEGREE_TABLE int8", table("int8", "COEF_BASE_DEGREE_TABLE", 10, 3), [(0 << 5) | 2, (9 << 5) | 3, (16 << 5) | 3])
     check("LANE_DRAIN_CYCLES_TABLE int8", table("int8", "LANE_DRAIN_CYCLES_TABLE", 4, 3), [3, 3, 6])
