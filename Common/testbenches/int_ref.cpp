@@ -16,3 +16,6 @@ extern "C" int c_int8_requantize(int acc, int m, int e, int zp, int lo, int hi) 
 extern "C" int c_int8_quantized_add(int q1, int q2, int z1, int z2, int m1, int m2, int e, int zo, int lo, int hi) {
   return (int)iref_qadd(q1, q2, z1, z2, (uint32_t)m1, (uint32_t)m2, e, zo, lo, hi);
 }
+
+// The full signed product of two w-bit values as 64 bits (w up to 32): the per-width multipliers' reference.
+extern "C" long long c_int_mul_wide(long long a, long long b, int w) { return (long long)iref_mul(a, b, w); }
