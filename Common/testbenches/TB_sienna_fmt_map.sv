@@ -1,7 +1,7 @@
 `timescale 1ns / 100ps
 
 // Checks sienna_fmt_pkg's define map under the build's define against the restructure spec's table, typed in here independently: the
-// precision constants, the bundles' widths, the lane constants and flat tables, the latency functions at each width, fmt_greater_than, fmt_relu and fmt_drop; +define+NO_FMT_DEFINE
+// precision constants, the bundles' widths, the lane constants, the latency functions at each width, fmt_greater_than, fmt_relu and fmt_drop; +define+NO_FMT_DEFINE
 // marks a build with no define, which must give fp32's values with FMT_DEFINE_COUNT 0.
 module TB_sienna_fmt_map;
   import sienna_fmt_pkg::*;
@@ -17,31 +17,25 @@ module TB_sienna_fmt_map;
 
 `ifdef FMT_INT8
   localparam string WANT_NAME = "int8";
-  localparam int WANT[16] = '{8, 32, 32, 32, 16, 1, 1, 1, 0, 4, 6, 0, 0, 1, 1, 0};  // widths, latencies, POST_DECREMENT_PAD_CYCLES, the HAS_ flags
+  localparam int WANT[15] = '{8, 32, 32, 32, 16, 1, 1, 1, 0, 4, 6, 0, 0, 1, 1};  // widths, latencies, the HAS_ flags
   localparam int WANT_LOWEST = 32'h80, WANT_ONE = 1;
   localparam int WANT_BITS[5] = '{67, 54, 110, 83, 30};  // lane_params_t, requant_params_t, add_params_t, lane_entry_t, requant_scale_t
   localparam int WANT_KEEP = 1;  // DROPOUT_KEEP_SCALE, unused in int8
   localparam int WANT_LANE[4] = '{0, 7, 3, 1};  // EXPONENT_WIDTH, MANTISSA_WIDTH, HORNER_STEP_LATENCY, HORNER_COEFFICIENT_LAG
-  localparam int WANT_BASE_DEGREE[6] = '{0, 2, 9, 3, 16, 3};  // (base, degree) of SELU, sigmoid, tanh
-  localparam int WANT_DRAIN[3] = '{3, 3, 6};  // drain cycles of SELU, sigmoid, tanh
 `elsif FMT_BF16
   localparam string WANT_NAME = "bf16";
-  localparam int WANT[16] = '{16, 32, 16, 16, 16, 3, 5, 3, 5, 0, 0, 3, 1, 0, 0, 0};
+  localparam int WANT[15] = '{16, 32, 16, 16, 16, 3, 5, 3, 5, 0, 0, 3, 1, 0, 0};
   localparam int WANT_LOWEST = 32'hFF80, WANT_ONE = 32'h3F80;
   localparam int WANT_BITS[5] = '{1, 1, 1, 1, 1};
   localparam int WANT_KEEP = 32'h4000;
   localparam int WANT_LANE[4] = '{8, 7, 8, 3};
-  localparam int WANT_BASE_DEGREE[6] = '{0, 8, 9, 6, 16, 8};
-  localparam int WANT_DRAIN[3] = '{0, 0, 5};
 `else
   localparam string WANT_NAME = "fp32";
-  localparam int WANT[16] = '{32, 32, 32, 32, 32, 8, 5, 8, 5, 0, 0, 8, 1, 0, 0, 1};
+  localparam int WANT[15] = '{32, 32, 32, 32, 32, 8, 5, 8, 5, 0, 0, 8, 0, 0, 0};  // fp32 has no GPNAE tail
   localparam int WANT_LOWEST = 32'hFF800000, WANT_ONE = 32'h3F800000;
   localparam int WANT_BITS[5] = '{1, 1, 1, 1, 1};
   localparam int WANT_KEEP = 32'h40000000;
   localparam int WANT_LANE[4] = '{8, 23, 13, 8};
-  localparam int WANT_BASE_DEGREE[6] = '{0, 8, 9, 6, 16, 8};
-  localparam int WANT_DRAIN[3] = '{0, 0, 10};
 `endif
 `ifdef NO_FMT_DEFINE
   localparam int WANT_DEFINES = 0;
@@ -70,7 +64,6 @@ module TB_sienna_fmt_map;
     expect_eq("HAS_FLOAT_TAIL", int'(HAS_FLOAT_TAIL), WANT[12]);
     expect_eq("HAS_REQUANT_EPILOGUE", int'(HAS_REQUANT_EPILOGUE), WANT[13]);
     expect_eq("HAS_RESIDUAL_ADD", int'(HAS_RESIDUAL_ADD), WANT[14]);
-    expect_eq("POST_DECREMENT_PAD_CYCLES", int'(POST_DECREMENT_PAD_CYCLES), WANT[15]);
     expect_eq("LOWEST_VALUE", int'(LOWEST_VALUE), WANT_LOWEST);
     expect_eq("ONE_VALUE", int'(ONE_VALUE), WANT_ONE);
     expect_eq("$bits(lane_params_t)", int'($bits(lane_params_t)), WANT_BITS[0]);
@@ -83,11 +76,6 @@ module TB_sienna_fmt_map;
     expect_eq("MANTISSA_WIDTH", int'(MANTISSA_WIDTH), WANT_LANE[1]);
     expect_eq("HORNER_STEP_LATENCY", int'(HORNER_STEP_LATENCY), WANT_LANE[2]);
     expect_eq("HORNER_COEFFICIENT_LAG", int'(HORNER_COEFFICIENT_LAG), WANT_LANE[3]);
-    for (int f = 0; f < 3; f++) begin  // the flat tables: (base, degree) at [f*10 +: 10], drain at [f*4 +: 4]
-      expect_eq($sformatf("COEF_BASE_DEGREE_TABLE base %0d", f), int'(COEF_BASE_DEGREE_TABLE[f*10+5 +: 5]), WANT_BASE_DEGREE[2*f]);
-      expect_eq($sformatf("COEF_BASE_DEGREE_TABLE degree %0d", f), int'(COEF_BASE_DEGREE_TABLE[f*10 +: 5]), WANT_BASE_DEGREE[2*f+1]);
-      expect_eq($sformatf("LANE_DRAIN_CYCLES_TABLE %0d", f), int'(LANE_DRAIN_CYCLES_TABLE[f*4 +: 4]), WANT_DRAIN[f]);
-    end
     // the latency functions at each width the wrappers take
     expect_eq("add_latency(ACC_DATA_WIDTH)", int'(add_latency(ACC_DATA_WIDTH)), WANT[6]);
     expect_eq("mul_latency(DATA_WIDTH, ACC_DATA_WIDTH)", int'(mul_latency(DATA_WIDTH, ACC_DATA_WIDTH)), (DATA_WIDTH == 32) ? WANT[7] : WANT[5]);

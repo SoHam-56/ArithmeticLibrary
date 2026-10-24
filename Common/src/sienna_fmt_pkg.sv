@@ -118,8 +118,7 @@ package sienna_fmt_pkg;
   localparam int ADD_LATENCY = 1;  // fmt_add: int32Adder
   localparam int LANE_MUL_LATENCY = 1;  // lane multiply: GPNAE's int16Multiplier and int24Multiplier
   localparam int LANE_ADD_LATENCY = 0;  // no lane add in int8: fmt_add is int32Adder only
-  localparam int POST_DECREMENT_PAD_CYCLES = 0;
-  localparam int HORNER_STEP_LATENCY = 3;  // one register, then fxMac's 2 cycles
+  localparam int HORNER_STEP_LATENCY = 3;  // one register, then GPNAE's fixedPointMultiplyAdd, 2 cycles
   localparam int HORNER_COEFFICIENT_LAG = 1;  // c_i is sampled one cycle after valid_i
   localparam int REQUANT_LATENCY = 4;  // int8Requantizer
   localparam int QUANT_ADD_LATENCY = 6;  // int8QuantizedAdder
@@ -175,10 +174,6 @@ package sienna_fmt_pkg;
     logic [5:0]  shift;
   } requant_scale_t;
   localparam logic [DATA_WIDTH-1:0] DROPOUT_KEEP_SCALE = 8'h01;  // unused: int8 keeps x (DROPOUT_SCALE_LATENCY 0)
-  // (base, degree) per activation, 10 bits each at [f*10 +: 10], f = 0 SELU, 1 sigmoid, 2 tanh (gpnae_poly_int8.sv:50-52).
-  localparam logic [29:0] COEF_BASE_DEGREE_TABLE = {5'd16, 5'd3, 5'd9, 5'd3, 5'd0, 5'd2};
-  // Group drain cycles per activation, 4 bits each at [f*4 +: 4]: LANE_MUL_LATENCY + 2, tanh LANE_MUL_LATENCY + fxMac's 2 + 3 (gpnae_poly_int8.sv:380).
-  localparam logic [11:0] LANE_DRAIN_CYCLES_TABLE = {4'd6, 4'd3, 4'd3};
 
 `elsif FMT_BF16
   localparam string FORMAT_NAME = "bf16";
@@ -193,7 +188,6 @@ package sienna_fmt_pkg;
   localparam int ADD_LATENCY = 5;  // fp32Adder
   localparam int LANE_MUL_LATENCY = 3;  // bf16Multiplier
   localparam int LANE_ADD_LATENCY = 5;  // bf16Adder
-  localparam int POST_DECREMENT_PAD_CYCLES = 0;
   localparam int HORNER_STEP_LATENCY = 8;  // LANE_MUL_LATENCY + LANE_ADD_LATENCY
   localparam int HORNER_COEFFICIENT_LAG = 3;  // the add issues as the product lands
   localparam int REQUANT_LATENCY = 0;
@@ -201,7 +195,7 @@ package sienna_fmt_pkg;
   localparam int DROPOUT_SCALE_LATENCY = 3;  // x * 2.0 on bf16Multiplier
   localparam logic [DATA_WIDTH-1:0] LOWEST_VALUE = 16'hFF80;  // -Inf
   localparam logic [DATA_WIDTH-1:0] ONE_VALUE = 16'h3F80;
-  localparam bit HAS_FLOAT_TAIL = 1'b1;
+  localparam bit HAS_FLOAT_TAIL = 1'b1;  // GPNAE's negative sigmoid past its Q set runs in fp32 on the tail
   localparam bit HAS_REQUANT_EPILOGUE = 1'b0;
   localparam bit HAS_RESIDUAL_ADD = 1'b0;
   typedef logic lane_params_t;  // 1-bit dummies in floats
@@ -210,10 +204,6 @@ package sienna_fmt_pkg;
   typedef logic lane_entry_t;
   typedef logic requant_scale_t;
   localparam logic [DATA_WIDTH-1:0] DROPOUT_KEEP_SCALE = 16'h4000;  // 2.0: a kept word is x * 2, 1/(1 - p) at p = 50%
-  // (base, degree) per activation, as gpnae_poly.sv:99-101.
-  localparam logic [29:0] COEF_BASE_DEGREE_TABLE = {5'd16, 5'd8, 5'd9, 5'd6, 5'd0, 5'd8};
-  // Only tanh drains, LANE_MUL_LATENCY + 2 cycles (gpnae_poly.sv:500).
-  localparam logic [11:0] LANE_DRAIN_CYCLES_TABLE = {4'd5, 4'd0, 4'd0};
 
 `else  // fp32: FMT_FP32 or no define
   localparam string FORMAT_NAME = "fp32";
@@ -228,7 +218,6 @@ package sienna_fmt_pkg;
   localparam int ADD_LATENCY = 5;
   localparam int LANE_MUL_LATENCY = 8;
   localparam int LANE_ADD_LATENCY = 5;
-  localparam int POST_DECREMENT_PAD_CYCLES = 1;  // fmt_add(x, -1.0) plus one register keeps fp32_down's 6 cycles
   localparam int HORNER_STEP_LATENCY = 13;
   localparam int HORNER_COEFFICIENT_LAG = 8;
   localparam int REQUANT_LATENCY = 0;
@@ -236,7 +225,7 @@ package sienna_fmt_pkg;
   localparam int DROPOUT_SCALE_LATENCY = 8;
   localparam logic [DATA_WIDTH-1:0] LOWEST_VALUE = 32'hFF800000;
   localparam logic [DATA_WIDTH-1:0] ONE_VALUE = 32'h3F800000;
-  localparam bit HAS_FLOAT_TAIL = 1'b1;
+  localparam bit HAS_FLOAT_TAIL = 1'b0;  // GPNAE's negative sigmoid runs on the barrel MAC: no tail
   localparam bit HAS_REQUANT_EPILOGUE = 1'b0;
   localparam bit HAS_RESIDUAL_ADD = 1'b0;
   typedef logic lane_params_t;
@@ -245,8 +234,6 @@ package sienna_fmt_pkg;
   typedef logic lane_entry_t;
   typedef logic requant_scale_t;
   localparam logic [DATA_WIDTH-1:0] DROPOUT_KEEP_SCALE = 32'h40000000;  // 2.0
-  localparam logic [29:0] COEF_BASE_DEGREE_TABLE = {5'd16, 5'd8, 5'd9, 5'd6, 5'd0, 5'd8};
-  localparam logic [11:0] LANE_DRAIN_CYCLES_TABLE = {4'd10, 4'd0, 4'd0};
 `endif
 
   // fmt_add's latency at data_width: the accumulator add (ACC_DATA_WIDTH) takes ADD_LATENCY, the float lane add LANE_ADD_LATENCY.
