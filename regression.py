@@ -19,7 +19,7 @@ TB = (r"^RESULT: PASSED",)  # the benches print RESULT and finish with status 0 
 TB_BAD = (r"RESULT: FAILED", r"^FAILURE:")
 LINT_BAD = (r"^%Warning-(?:LATCH|MULTIDRIVEN|UNOPTFLAT).*$",)
 POINTS = [  # (unit, target, need, bad, firing scan)
-    ("Common", "pkg", TB, TB_BAD, True), ("Common", "dump32", TB, TB_BAD, True), ("Common", "ipu", TB, TB_BAD, True),
+    ("Common", "dump32", TB, TB_BAD, True), ("Common", "ipu", TB, TB_BAD, True),
     ("Common", "fpu", TB, TB_BAD, True), ("Common", "truth", TB + (r"^truth selftest: \d+ checks, 0 failures$",), TB_BAD, True),
     ("Common", "credit", (r"^credit lint: 0 warnings, 0 errors$",), (r"credit FAIL",), False),  # and CREDIT_OK 'credit OK' lines; the fault modes' lines quote the assertions they fire
     ("Adders/FP32", "verilator", (r"^SUCCESS: All \d+ vectors passed",), TB_BAD, True),

@@ -1,11 +1,12 @@
 `timescale 1ns / 100ps
 
-// int8Requantizer against the C reference through DPI on every row of +VEC, latency req_lat(), a bubble every 64 rows; +DUMP writes each result; VIVADO reads the expected word from the row instead.
+// int8Requantizer against the C reference through DPI on every row of +VEC, latency REQUANT_LATENCY (build at +define+FMT_INT8), a bubble every 64 rows; +DUMP writes each result; VIVADO reads the expected word from the row instead.
 module TB_int8Requantizer;
 `ifndef VIVADO
   import "DPI-C" function int c_int8_requantize(input int acc, input int m, input int e, input int zp, input int lo, input int hi);
 `endif
-  localparam int LAT = sienna_fmt_pkg::req_lat();
+  localparam int LAT = sienna_fmt_pkg::REQUANT_LATENCY;
+  initial if (LAT == 0) $fatal(1, "TB_int8Requantizer: REQUANT_LATENCY is 0: build at +define+FMT_INT8");
   logic clk = 0, rstn = 0;
   always #5 clk = ~clk;
   logic valid = 0;
@@ -120,7 +121,7 @@ module TB_int8Requantizer;
     end
     if (lat != LAT) begin
       errs++;
-      $display("[FAIL] latency %0d, sienna_fmt_pkg::req_lat() says %0d", lat, LAT);
+      $display("[FAIL] latency %0d, sienna_fmt_pkg::REQUANT_LATENCY says %0d", lat, LAT);
     end
     $display("int8Requantizer: %0d rows from %s against the %s, %0d errors, latency %0d", checked, vec,
 `ifdef VIVADO

@@ -1,12 +1,13 @@
 `timescale 1ns / 100ps
 
-// int8QuantizedAdder against the C reference through DPI: every (q1, q2) under each +CONSTS set, then every +VEC row; latency qadd_lat(), a bubble every 64 beats; +DUMP writes each result; VIVADO reads vectors.mem's expected words instead.
+// int8QuantizedAdder against the C reference through DPI: every (q1, q2) under each +CONSTS set, then every +VEC row; latency QUANT_ADD_LATENCY (build at +define+FMT_INT8), a bubble every 64 beats; +DUMP writes each result; VIVADO reads vectors.mem's expected words instead.
 module TB_int8QuantizedAdder;
 `ifndef VIVADO
   import "DPI-C" function int c_int8_quantized_add(input int q1, input int q2, input int z1, input int z2, input int m1, input int m2,
                                                    input int e, input int zo, input int lo, input int hi);
 `endif
-  localparam int LAT = sienna_fmt_pkg::qadd_lat();
+  localparam int LAT = sienna_fmt_pkg::QUANT_ADD_LATENCY;
+  initial if (LAT == 0) $fatal(1, "TB_int8QuantizedAdder: QUANT_ADD_LATENCY is 0: build at +define+FMT_INT8");
   logic clk = 0, rstn = 0;
   always #5 clk = ~clk;
   logic valid = 0;
@@ -140,7 +141,7 @@ module TB_int8QuantizedAdder;
     end
     if (lat != LAT) begin
       errs++;
-      $display("[FAIL] latency %0d, sienna_fmt_pkg::qadd_lat() says %0d", lat, LAT);
+      $display("[FAIL] latency %0d, sienna_fmt_pkg::QUANT_ADD_LATENCY says %0d", lat, LAT);
     end
     $display("int8QuantizedAdder: %0d beats against the %s, %0d errors, latency %0d", checked,
 `ifdef VIVADO

@@ -21,7 +21,7 @@ FORMATS = {"fp32": FP32, "bf16": BF16}
 
 
 def from_fp32(x: int, man_w: int) -> int:
-    """sienna_fmt_pkg::from_fp32: a finite fp32 constant rounded to nearest even at man_w bits."""
+    """A finite fp32 constant rounded to nearest even at man_w bits (the RTL's constants are written already rounded)."""
     sh = 23 - man_w
     return x if sh == 0 else (x + (1 << (sh - 1)) - 1 + ((x >> sh) & 1)) >> sh
 
@@ -111,7 +111,7 @@ def add(f: Fmt, a, b, fp32_overflow_quirk: bool = False):
 
 
 def widen(f: Fmt, x):
-    """sienna_fmt_pkg::widen: an 8-exponent-bit float's bits to fp32 bits, exactly."""
+    """An 8-exponent-bit float's bits to fp32 bits, exactly."""
     return np.asarray(x, dtype=np.int64) << (23 - f.m)
 
 

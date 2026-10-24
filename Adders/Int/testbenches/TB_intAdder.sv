@@ -122,9 +122,9 @@ module TB_intAdder #(
       errs++;
       $display("[FAIL] %0d results for %0d inputs", checked, va.size());
     end
-    if (lat != sienna_fmt_pkg::add_lat(0, 7)) begin
+    if (lat != 1) begin  // intAdder registers its sum once at every width
       errs++;
-      $display("[FAIL] latency %0d, sienna_fmt_pkg::add_lat(0, 7) says %0d", lat, sienna_fmt_pkg::add_lat(0, 7));
+      $display("[FAIL] latency %0d, intAdder's is 1", lat);
     end
     $display("intAdder W=%0d: %0d sums against the C reference, %0d errors, latency %0d, %0d idle cycles", W, checked, errs, lat,
              idles);

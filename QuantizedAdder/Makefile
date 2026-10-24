@@ -10,7 +10,7 @@ PYTHON   ?= python3
 $(shell mkdir -p $(PRJ_DIR)/Verilator)  # Verilator makes --Mdir but not its parent
 V        = $(PRJ_DIR)/Verilator
 DESIGN   = $(COMMON)/src/sienna_fmt_pkg.sv $(PRJ_DIR)/src/int8QuantizedAdder.sv
-FLAGS    = --binary --timing --assert --sv -I$(TB_DIR) --Wno-WIDTHTRUNC --Wno-WIDTHEXPAND --Wno-WIDTHCONCAT --Wno-INITIALDLY -j $(shell nproc) --build-jobs 0 $(EXTRA_FLAGS)
+FLAGS    = --binary --timing --assert --sv +define+FMT_INT8 -I$(TB_DIR) --Wno-WIDTHTRUNC --Wno-WIDTHEXPAND --Wno-WIDTHCONCAT --Wno-INITIALDLY -j $(shell nproc) --build-jobs 0 $(EXTRA_FLAGS)
 GEN      = $(PYTHON) $(TB_DIR)/gen_quantized_adder_vectors.py
 CHECK    = $(PYTHON) $(TB_DIR)/check_quantized_adder.py
 BUILD    = verilator $(FLAGS) --top-module TB_int8QuantizedAdder --Mdir $(V)/ref $(DESIGN) $(TB_DIR)/TB_int8QuantizedAdder.sv \

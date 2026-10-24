@@ -119,9 +119,9 @@ module TB_intMultiplier #(
       errs++;
       $display("[FAIL] %0d results for %0d pairs", checked, n_expect);
     end
-    if (lat != sienna_fmt_pkg::mul_lat(0, 7)) begin
+    if (lat != 1) begin  // intMultiplier registers its product once at every width
       errs++;
-      $display("[FAIL] latency %0d, sienna_fmt_pkg::mul_lat(0, 7) says %0d", lat, sienna_fmt_pkg::mul_lat(0, 7));
+      $display("[FAIL] latency %0d, intMultiplier's is 1", lat);
     end
     $display("intMultiplier W=%0d: %0d products against the C reference, %0d errors, latency %0d, %0d idle cycles", W, checked,
              errs, lat, idles);

@@ -10,7 +10,7 @@ PYTHON   ?= python3
 $(shell mkdir -p $(PRJ_DIR)/Verilator)  # Verilator makes --Mdir but not its parent
 V        = $(PRJ_DIR)/Verilator
 DESIGN   = $(COMMON)/src/sienna_fmt_pkg.sv $(PRJ_DIR)/src/int8Requantizer.sv
-FLAGS    = --binary --timing --assert --sv -I$(TB_DIR) --Wno-WIDTHTRUNC --Wno-WIDTHEXPAND --Wno-WIDTHCONCAT --Wno-INITIALDLY -j $(shell nproc) --build-jobs 0 $(EXTRA_FLAGS)
+FLAGS    = --binary --timing --assert --sv +define+FMT_INT8 -I$(TB_DIR) --Wno-WIDTHTRUNC --Wno-WIDTHEXPAND --Wno-WIDTHCONCAT --Wno-INITIALDLY -j $(shell nproc) --build-jobs 0 $(EXTRA_FLAGS)
 GEN      = $(PYTHON) $(TB_DIR)/gen_requantizer_vectors.py
 CHECK    = $(PYTHON) $(TB_DIR)/check_requantizer.py
 BUILD    = verilator $(FLAGS) --top-module TB_int8Requantizer --Mdir $(V)/ref $(DESIGN) $(TB_DIR)/TB_int8Requantizer.sv \
