@@ -9,6 +9,15 @@ The two int8 units take real scales encoded by the host (`ipu.encode_scale`, `ip
 
 Both are checked against the exact real-valued result: every output must be within one output step, or 1%, of it.
 
+## One format per build
+
+A design built on this library picks its number format with one define, `+define+FMT_FP32`, `FMT_BF16` or `FMT_INT8` (no define is fp32); `make FMT=<f>` sets it (`Common/fmt.mk`). Only two kinds of code read it:
+
+- `Common/src/sienna_fmt_pkg.sv`, the format package: widths (`DATA_WIDTH`, `ACC_DATA_WIDTH`, `RESULT_DATA_WIDTH`, `BIAS_DATA_WIDTH`), latencies, format-dependent constants and steps (`LOWEST_VALUE`, `ONE_VALUE`, `DROPOUT_KEEP_SCALE`, `fmt_greater_than`, `fmt_relu`, `fmt_drop`), flags (`HAS_REQUANT_EPILOGUE`, `HAS_RESIDUAL_ADD`) and the int8 parameter bundles (1-bit placeholders in float builds). `Common/models/fmt_pkg.py` is the one Python reader of it.
+- The arithmetic units and the two wrappers `Fmt/src/fmt_mul.sv` and `fmt_add.sv`, which elaborate only the selected format's unit (fp32Multiplier and fp32Adder; bf16Multiplier, bf16WideMultiplier, bf16Adder and fp32ToBf16; int8Multiplier and int32Adder).
+
+Everything else carries plain words. `make check-fmt` fails if any other file names a format.
+
 ## Regression
 
 ```bash
