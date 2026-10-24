@@ -182,7 +182,7 @@ def main():
     q = ipu.requantize(acc, [m for m, _ in codes], [e for _, e in codes], zp, lo, hi)
     check("gate_requantize passes ipu.requantize on encode_scale's words, 20000 draws", truth.gate_requantize(acc, sc, zp, lo, hi, q).ok, True)
     w = np.concatenate([rng.integers(0, 1 << 32, 20000), [0x7F7F8000, 0xFF7F8000, 0x7F7F7FFF, 0x3F808000, 0x3F818000]])
-    w = w[((w >> 23) & 0xFF) != 0]  # fpNarrow flushes subnormal inputs as narrow_ref does; compared on normals, NaN and Inf
+    w = w[((w >> 23) & 0xFF) != 0]  # fp32ToBf16 flushes subnormal inputs as narrow_ref does; compared on normals, NaN and Inf
     want = np.asarray(fpu.narrow(fpu.FORMATS["bf16"], w), dtype=np.int64)
     got = truth.narrow_ref("bf16", w)
     vw, vg = truth.decode("bf16", want), truth.decode("bf16", got)

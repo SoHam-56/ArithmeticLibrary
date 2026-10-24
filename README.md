@@ -1,6 +1,6 @@
 # ArithmeticLibrary
 
-Arithmetic units in SystemVerilog (fp32, bf16 and int8 adders and multipliers, a fixed-point MAC, the int8 requantizer and quantized adder, the fp32-to-bf16 narrower, credit links), each with a bench against a reference (SoftFloat, a C model through DPI, or the Python models in `Common/models`).
+Arithmetic units in SystemVerilog (fp32, bf16 and int8 adders and multipliers, the int8 requantizer and quantized adder, the fp32-to-bf16 narrower, credit links), each with a bench against a reference (SoftFloat, a C model through DPI, or the Python models in `Common/models`).
 
 The two int8 units take real scales encoded by the host (`ipu.encode_scale`, `ipu.encode_add`), so they work for any scale within the encoder's domain (the adder refuses input-to-output scale ratios of 2^23 or more), not one framework's arithmetic:
 
@@ -22,11 +22,11 @@ Everything else carries plain words. `make check-fmt` fails if any other file na
 
 ```bash
 make regression          # every unit bench and model check once, then one table (make -j4 runs four at a time)
-make regression/Adders/FP/check   # one point; python3 regression.py --action points lists them
+make regression/Adders/Int/check  # one point; python3 regression.py --action points lists them
 make regression-summary  # the table again, from results/regression/
 ```
 
-Each point runs in a private copy of the working tree (git's files, ignored outputs left out) and passes only on its own verdict (the bench's `RESULT: PASSED`, the model check's 0 mismatches, each lint's count line with 0 errors), never on a clean exit alone. The regression fails if any point fails or did not run. Each unit's Makefile still runs its benches alone, e.g. `make -C Adders/FP check`.
+Each point runs in a private copy of the working tree (git's files, ignored outputs left out) and passes only on its own verdict (the bench's `RESULT: PASSED`, the model check's 0 mismatches, each lint's count line with 0 errors), never on a clean exit alone. The regression fails if any point fails or did not run. Each unit's Makefile still runs its benches alone, e.g. `make -C Adders/Int check`.
 
 `Common/regress.py` is the regression engine every repo that holds this library uses for its own `make regression`.
 

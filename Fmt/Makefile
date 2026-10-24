@@ -15,15 +15,14 @@ include $(COMMON)/fmt.mk
 $(shell mkdir -p $(V))  # Verilator makes --Mdir but not its parent
 
 PKG = $(COMMON)/src/sienna_fmt_pkg.sv  # the package with its define map
-# the per-format units the wrappers and test tops use, and the generic units the equivalence tops compare them with
+# the per-format units the wrappers and test tops use, and the generic integer units the equivalence tops compare them with
 UNITS = $(ARIL)/Multipliers/Radix4Booth/src/R4Booth.sv $(ARIL)/Multipliers/Karatsuba/src/karatsubaUnsigned.sv \
         $(ARIL)/Multipliers/FP32/src/fp32Multiplier.sv $(ARIL)/Adders/FP32/src/LZC.sv $(ARIL)/Adders/FP32/src/fp32Adder.sv \
         $(ARIL)/Multipliers/BF16/src/bf16Multiplier.sv $(ARIL)/Adders/BF16/src/bf16Adder.sv \
         $(ARIL)/Multipliers/BF16Wide/src/bf16WideMultiplier.sv $(ARIL)/Converters/FP32ToBF16/src/fp32ToBf16.sv \
         $(ARIL)/Multipliers/Int8/src/int8Multiplier.sv $(ARIL)/Adders/Int32/src/int32Adder.sv \
         $(ARIL)/Requantizer/src/int8Requantizer.sv $(ARIL)/QuantizedAdder/src/int8QuantizedAdder.sv
-GENERIC = $(ARIL)/Multipliers/FP/src/fpMultiplier.sv $(ARIL)/Adders/FP/src/fpAdder.sv $(ARIL)/Multipliers/FPWiden/src/fpMulWiden.sv \
-        $(ARIL)/Converters/FPNarrow/src/fpNarrow.sv $(ARIL)/Multipliers/Int/src/intMultiplier.sv $(ARIL)/Adders/Int/src/intAdder.sv
+GENERIC = $(ARIL)/Multipliers/Int/src/intMultiplier.sv $(ARIL)/Adders/Int/src/intAdder.sv
 EQ_ONLY = $(ARIL)/Multipliers/Int16/src/int16Multiplier.sv $(ARIL)/Multipliers/Int24/src/int24Multiplier.sv  # GPNAE's units, proven here
 WRAPPERS = $(PRJ_DIR)/src/fmt_mul.sv $(PRJ_DIR)/src/fmt_add.sv
 TOPS     = $(TB_DIR)/fmt_tops.sv  # test tops: fmt_greater_than, fmt_relu, fp32ToBf16, int8Requantizer, int8QuantizedAdder under the port names the benches drive
@@ -66,7 +65,7 @@ help:
 	@echo "  make exhaustive FMT=<f> - the unit sweeps of the gate table (sweep.py; every core)"
 	@echo "  make sweep-build KIND=<k> FMT=<f> [DATA_WIDTH=<n>] [EXT_DATA_WIDTH=<n>] [RULE=lane] - one sweep harness (kinds: mul add cmp relu narrow"
 	@echo "                        requantize quantized_add; RULE=lane judges fmt_add by the lane rule at any width)"
-	@echo "  make equiv            - each per-format unit equals the generic unit it replaces, and the copy gate (equiv.py; every core)"
+	@echo "  make equiv            - each per-width integer unit equals the generic unit it replaces (equiv.py; every core)"
 	@echo "  make eq-build TOP=<eq top> BITS=<n> [COMB=1] - one equivalence harness"
 
 # ── one point: lint (0 library warnings, 0 errors), then TB_fmt ──
@@ -250,8 +249,8 @@ sweep-build:
 exhaustive:
 	$(PYTHON) $(PRJ_DIR)/sweep.py --fmt $(FMT) $(if $(SWEEP_KINDS),--kinds $(SWEEP_KINDS)) $(if $(SWEEP_ARGS),$(SWEEP_ARGS))
 
-# ── equivalence: each per-format unit against the generic unit it replaces (eq_tops.sv), and the copy gate ──
-TOP  ?= eq_bf16_mul
+# ── equivalence: each per-width integer unit against the generic unit it replaces (eq_tops.sv) ──
+TOP  ?= eq_int16_mul
 BITS ?= 16
 EQ_DIR = $(V)/eq_$(TOP)
 eq-build:

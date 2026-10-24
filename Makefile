@@ -15,14 +15,14 @@ default: help
 
 help:
 	@echo "  make regression            - every unit bench and model check (regression.py --action points lists them), then one table"
-	@echo "  make regression/<point>    - one point, e.g. regression/Adders/FP/check"
+	@echo "  make regression/<point>    - one point, e.g. regression/Adders/Int/check"
 	@echo "  make regression-summary    - the table of the results in REG_DIR (default results/regression)"
 	@echo "  make check-fmt             - no RTL outside the allowlist names a precision (FMT_, EXP_W, MAN_W, EXPONENT_WIDTH, MANTISSA_WIDTH, is_int,"
 	@echo "                               is_fp32, from_fp32, widen()"
 	@echo "  make exhaustive FMT=<f>    - the unit sweeps of the restructure's gate table for one format (Fmt/sweep.py, every core)"
-	@echo "  make equiv                 - each per-format unit against the generic unit it replaces, and the copy gate (Fmt/equiv.py, every core)"
+	@echo "  make equiv                 - each per-width integer unit against the generic unit it replaces (Fmt/equiv.py, every core)"
 	@echo "  FMT ?= fp32 (fp32, bf16 or int8) picks the define, +define+FMT_<F>; make regression runs every format's points whatever FMT is"
-	@echo "  Each unit's own Makefile has its benches: make -C Adders/FP check, ..."
+	@echo "  Each unit's own Makefile has its benches: make -C Adders/Int check, ..."
 
 # One point: runs in a private copy of the tree, writes $(REG_DIR)/<point>.log and .json.
 regression/%:

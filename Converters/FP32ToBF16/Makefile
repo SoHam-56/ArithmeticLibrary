@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 # fp32ToBf16: check (its direct reference bench, round to nearest even on corners, every tie class and RANDOM values, then the dump against
-# fpu.narrow), lint (-Wall, must be clean: 0 warnings, 0 errors). make -C Fmt equiv proves its words equal to fpNarrow (8, 7) on every fp32 word.
+# fpu.narrow), lint (-Wall, must be clean: 0 warnings, 0 errors). make -C Fmt equiv proved its words equal to fpNarrow (8, 7) on every fp32 word before fpNarrow left the library (acefcbc).
 PRJ_DIR = $(shell pwd)
 ARIL    = $(PRJ_DIR)/../..
 COMMON  = $(ARIL)/Common

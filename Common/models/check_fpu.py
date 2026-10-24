@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Checks a float-unit dump (a b result flags per line; flags are ov un inv as binary digits; fpNarrow: x y) against fpu.py, bit for bit."""
+"""Checks a float-unit dump (a b result flags per line; flags are ov un inv as binary digits; the narrower: x y) against fpu.py, bit for bit."""
 import argparse
 import os
 import sys

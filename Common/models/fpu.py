@@ -1,7 +1,7 @@
-"""Bit-exact models of AriL's float units, vectorized: fpMultiplier and fpAdder at any (EXP_W, MAN_W), and at (8, 23)
-fp32Multiplier and fp32Adder. Operands and results are bit patterns in int64 arrays; each op returns (result, overflow,
+"""Bit-exact models of AriL's float units, vectorized: the multiply and add at any (EXP_W, MAN_W) (bf16Multiplier and bf16Adder at
+(8, 7)), and at (8, 23) fp32Multiplier and fp32Adder. Operands and results are bit patterns in int64 arrays; each op returns (result, overflow,
 underflow, invalid). Truncating; subnormal inputs read as zero; tiny results flush to a signed zero; NaN is canonical.
-Also fpMulWiden (mul_widen), the exact widening to fp32 (widen) and fpNarrow, fp32 to f rounded to nearest even (narrow)."""
+Also bf16WideMultiplier (mul_widen), the exact widening to fp32 (widen) and fp32ToBf16, fp32 to f rounded to nearest even (narrow)."""
 import numpy as np
 
 
@@ -68,7 +68,7 @@ def mul(f: Fmt, a, b):
 
 
 def add(f: Fmt, a, b, fp32_overflow_quirk: bool = False):
-    """fpAdder(A=a, B=b); with fp32_overflow_quirk, fp32Adder, which also raises overflow on a negative exponent (D-1)."""
+    """The add (bf16Adder at (8, 7)) of a and b; with fp32_overflow_quirk, fp32Adder, which also raises overflow on a negative exponent (D-1)."""
     sa, ea, ra = _split(f, a)
     sb, eb, rb = _split(f, b)
     za, ia, na, sna = _classes(f, ea, ra)
@@ -116,12 +116,12 @@ def widen(f: Fmt, x):
 
 
 def mul_widen(f: Fmt, a, b):
-    """fpMulWiden: the exact fp32 product of two f operands, as fp32Multiplier on the widened operands."""
+    """bf16WideMultiplier at (8, 7): the exact fp32 product of two f operands, as fp32Multiplier on the widened operands."""
     return mul(FP32, widen(f, a), widen(f, b))
 
 
 def narrow(f: Fmt, x):
-    """fpNarrow: fp32 bits to f, round to nearest even; NaN -> f.qnan; exponent 0 -> signed zero; overflow -> infinity."""
+    """fp32ToBf16 at (8, 7): fp32 bits to f, round to nearest even; NaN -> f.qnan; exponent 0 -> signed zero; overflow -> infinity."""
     x = np.asarray(x, dtype=np.int64) & 0xFFFFFFFF  # a sign-extended int32 caller reads as its 32 bits
     sh = 23 - f.m
     if sh == 0:

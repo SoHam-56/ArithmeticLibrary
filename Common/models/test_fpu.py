@@ -10,7 +10,7 @@ import fpu  # noqa: E402
 
 fails = checks = 0
 
-# fp32 bits, bf16 bits after fpNarrow; each comment is the derivation (16 dropped bits, kept LSB).
+# fp32 bits, bf16 bits after fp32ToBf16; each comment is the derivation (16 dropped bits, kept LSB).
 NARROW_BF16 = [
     (0x00000000, 0x0000),  # +0
     (0x80000000, 0x8000),  # -0

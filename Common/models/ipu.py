@@ -29,7 +29,7 @@ def int_add(a, b, w=32):
 
 
 def fx_mac(a, x, c, w=16, frac=11):
-    """fxMac, one Horner step: the 2w-bit product shifted right by frac with floor (D-1), plus c, saturated to w bits."""
+    """GPNAE's fixedPointMultiplyAdd at FRAC = frac (fxMac until it left the library), one Horner step: the 2w-bit product shifted right by frac with floor (D-1), plus c, saturated to w bits."""
     p = (sx(a, w) * sx(x, w)) >> frac
     return np.clip(p + sx(c, w), -(1 << (w - 1)), (1 << (w - 1)) - 1)
 

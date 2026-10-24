@@ -1,6 +1,6 @@
 SHELL := /bin/bash
-# bf16WideMultiplier: verilator (its direct reference bench: SoftFloat's exact fp32 product through DPI, bit for bit, flags), mutant (a planted fault its bench must fail), lint (-Wall, must be clean: 0 warnings, 0 errors). make -C Fmt equiv proves its words and done
-# cycles equal to fpMulWiden (8, 7).
+# bf16WideMultiplier: verilator (its direct reference bench: SoftFloat's exact fp32 product through DPI, bit for bit, flags), mutant (a planted fault its bench must fail), lint (-Wall, must be clean: 0 warnings, 0 errors). make -C Fmt equiv proved its words and done
+# cycles equal to fpMulWiden (8, 7) before that generic unit left the library (ArithmeticLibrary acefcbc).
 PRJ_DIR = $(shell pwd)
 ARIL    = $(PRJ_DIR)/../..
 COMMON  = $(ARIL)/Common

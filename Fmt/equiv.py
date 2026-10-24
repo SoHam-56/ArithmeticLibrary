@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Equivalence of each per-format unit with the generic unit it replaces (results and done cycles, 0 differences): the bf16 units and
-the integer units, and the copy gate in its new direction (fp32Multiplier == fpMultiplier (8, 23), fp32Adder == fpAdder (8, 23)).
+"""Equivalence of each per-width integer unit with the generic integer unit it replaces (results and done cycles, 0 differences). The float
+pairs (the bf16 units against fpMultiplier, fpAdder, fpMulWiden and fpNarrow at (8, 7), and the fp32 copy gate) left with those generic units.
 Builds each eq_tops.sv top, runs its slices on every core, writes one EQUIV line per pair to results/equiv/equiv.log."""
 import argparse
 import concurrent.futures as cf
@@ -12,15 +12,8 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PAIRS16_SLICES = [("pairs16", {"lo": hb}) for hb in range(256)]  # every 16-bit pair: 2^32
-WORDS32_SLICES = [("unary32", {"lo": hb}) for hb in range(256)]  # every 32-bit word
 RANDOM_SLICES = lambda n, k=8: [("random", {"n": n // k, "seed": 500 + i}) for i in range(k)]
 PLAN = {  # top: (operand bits, combinational, slices, what it proves)
-    "eq_bf16_mul": (16, False, PAIRS16_SLICES, "bf16Multiplier == fpMultiplier (8, 7), all 2^32 pairs"),
-    "eq_bf16_add": (16, False, PAIRS16_SLICES, "bf16Adder == fpAdder (8, 7), all 2^32 pairs"),
-    "eq_bf16_wide": (16, False, PAIRS16_SLICES, "bf16WideMultiplier == fpMulWiden (8, 7), all 2^32 pairs"),
-    "eq_bf16_narrow": (32, True, WORDS32_SLICES, "fp32ToBf16 == fpNarrow (8, 7), all 2^32 words"),
-    "eq_fp32_mul": (32, False, [("dense2", {})] + RANDOM_SLICES(10**8), "fp32Multiplier checked against fpMultiplier (8, 23), dense exponents + 10^8 random"),
-    "eq_fp32_add": (32, False, [("dense2", {})] + RANDOM_SLICES(10**8), "fp32Adder checked against fpAdder (8, 23), dense exponents + 10^8 random"),
     "eq_int8_mul": (8, False, [("pairs8", {})], "int8Multiplier == intMultiplier #(8), all 2^16 pairs"),
     "eq_int16_mul": (16, False, PAIRS16_SLICES, "int16Multiplier == intMultiplier #(16), all 2^32 pairs"),
     "eq_int24_mul": (24, False, [("corners", {})] + RANDOM_SLICES(10**8),
