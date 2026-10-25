@@ -13,6 +13,7 @@ import time
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 FIRING = re.compile(r"^.*(?:Assertion failed|%Error).*$"
                     r'|^(?:Error|Fatal): "[^"]*", \d+: .*$|^Error-\[.*$|^"[^"]*", \d+: \S+: started at .* failed at .*$', re.M)  # a firing assertion leaves the exit status clean, so the log is the witness; the second line is VCS's forms
+INNER_SKIP = re.compile(r"^\s*skipped: (.+)$", re.M)  # a part a point skips inside its run (e.g. a model whose input file is absent)
 XLINE = re.compile(r"^.*\bFAIL: [XZ] in .*$", re.M)  # a parser's line for an x or z in a word, count or hash (fourstate.py)
 INTERNAL = re.compile(r"^.*(?:%Error: Internal Error|%Error: Verilator internal fault|\bV3\w+\.(?:cpp|h):\d+).*$", re.M)  # Verilator's own crash, not the design's
 MAKE_VARS = ("MAKEFLAGS", "MAKELEVEL", "MFLAGS", "MAKEOVERRIDES", "SMALL", "FMT", "REG_DIR", "REG_RUN", "EXTRA_FLAGS", "SIM_ARGS",
@@ -252,7 +253,7 @@ def summary(spec: Spec, a) -> None:
     if not pts:
         print(f"{spec.title} FAIL: no points selected")
         sys.exit(1)
-    res, rows = os.path.abspath(a.results), []
+    res, rows, inner = os.path.abspath(a.results), [], set()
     for p in pts:
         base = os.path.join(res, p)
         try:
@@ -275,6 +276,7 @@ def summary(spec: Spec, a) -> None:
         else:
             text = open(base + ".log", errors="replace").read() if os.path.exists(base + ".log") else ""
             v, secs = (spec.verdict(p, text, rec.get("rc")) if text else "NOT RUN (result without its log)"), rec.get("secs", 0.0)
+            inner.update(x.strip() for x in INNER_SKIP.findall(ANSI.sub("", text)) if v == "PASS")  # what a passing point left out inside its run
         rows.append((p, v, spec.gated(p) and not v.startswith(("N/A", "SKIPPED")), secs, base + ".log" + ("  (retried once after a Verilator internal error)" if rec and rec.get("retried") else ""),
                      rec is not None))
     gated = [r for r in rows if r[2]]
@@ -296,7 +298,7 @@ def summary(spec: Spec, a) -> None:
     last += f"; {n_sk} skipped" if n_sk else ""
     hints = sorted({r[1][9:-1] for r in rows if r[1].startswith("NOT RUN (") and "no result" not in r[1] and "stale" not in r[1] and "without its log" not in r[1]})
     skips = sorted({r[1][9:-1] for r in rows if r[1].startswith("SKIPPED (")})
-    table += [f"not run: {h}" for h in hints] + [f"skipped: {h}" for h in skips] + [last]
+    table += [f"not run: {h}" for h in hints] + [f"skipped: {h}" for h in skips] + [f"skipped inside passing points: {h}" for h in sorted(inner)] + [last]
     os.makedirs(res, exist_ok=True)
     open(os.path.join(res, "regression.log"), "w").write("\n".join(table) + "\n")
     print("\n".join(table) + f"\ntable: {os.path.join(res, 'regression.log')}")

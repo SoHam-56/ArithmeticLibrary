@@ -691,6 +691,10 @@ def test_vcs_summary_and_skips():
         code, _ = _exit(regress.summary, spec, _args(action="summary", results=d, small=True, run="r1"))
         t = open(os.path.join(d, "regression.log")).read()
         assert code == 0 and "FAKE REGRESSION PASS: 2 of 2 gated points passed; 1 reported, not gated; 2 not applicable to vcs" in t, t
+        open(os.path.join(d, "f1/N8_T2/run.log"), "a").write("  skipped: model kws: marvin.wav not in /m (copy it)\n")
+        _exit(regress.summary, spec, _args(action="summary", results=d, small=True, run="r1"))
+        t = open(os.path.join(d, "regression.log")).read()
+        assert t.splitlines()[-2] == "skipped inside passing points: model kws: marvin.wav not in /m (copy it)", t  # what a point left out is listed
     with tempfile.TemporaryDirectory() as d:
         src = os.path.join(d, "tree")
         os.makedirs(src)
