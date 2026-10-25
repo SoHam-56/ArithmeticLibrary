@@ -62,13 +62,13 @@ Every regression above runs on Verilator by default. The same regression also ru
 make -j4 regression SIM=vcs
 ```
 
-**Read the table** (also written to `results/regression/regression.log`). Each row is one check: its name, its verdict, its time and its log. The last line is the overall verdict, for example `ARITHMETICLIBRARY REGRESSION PASS: 57 of 57 gated points passed; 12 reported, not gated; 8 not applicable to vcs`.
+**Read the table** (also written to `results/regression/regression.log`). Each row is one check: its name, its verdict, its time and its log. The last line is the overall verdict, for example `ARITHMETICLIBRARY REGRESSION PASS: 57 of 57 gated points passed; 12 reported, not gated; 4 not applicable to vcs`.
 
 | Verdict | Meaning |
 |---|---|
 | `PASS` | the check met its gate: the same true-function and reference gates as the Verilator run |
 | `FAIL (...)` | it did not; the bracket says why, the log says where |
-| `N/A (...)` | the check tests something only Verilator has (its lint messages, its C++ harnesses, the Vivado benches); listed, never run |
+| `N/A (...)` | the check tests something only Verilator has (its lint messages, its C++ harnesses); listed, never run |
 | `..., reported, not gated` | a VCS lint (`+lint=all`): its counts are shown but do not fail the run until its warning baseline is recorded (below) |
 
 **If something fails**, send back `results/regression/regression.log` and the log of each failing row (the path is on the row). A line such as `FAIL: X in output word 37 of test add (add_int32.txt)` means the design produced an unknown value where a number was expected; that is a real finding for the authors, not a set-up problem. A license or compile failure shows as `FAIL (exit N)` with VCS's own message in the log.

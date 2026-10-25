@@ -85,7 +85,6 @@ TABLE = {f"{u}/{t}": (u, t, need, bad, firing) for u, t, need, bad, firing in PO
 # ── SIM=vcs: each point's VCS target, the Verilator-only points, and the VCS lint labels ──
 VCS_TARGET = {"verilator": "vcs", "verilator16": "vcs16"}  # the reference benches' VCS targets; every other target takes SIM=vcs itself
 VERILATOR_ONLY = {  # point (or target) -> why it means nothing under VCS
-    "vivado_tb": "a Vivado bench, run here on Verilator; the Vivado removal takes it out",
     "fmt/controls": "Verilator's lint and preprocessor messages and its C++ sweep harness (sweep_fmt.cpp) are what it checks",
     "fmt/mutants": "each kill is judged by TB_fmt and by a Verilator C++ sweep harness (sweep_fmt.cpp drives a Verilated model)",
     "fmt/lint_tops": "verilator --lint-only against Verilator's recorded lint baseline; the unit lint points run VCS's +lint=all",
@@ -631,7 +630,7 @@ def test_vcs_points_name_vcs():
         runs += bool(re.search(r"(?m)(^|&& )vcs -full64 ", r.stdout) or "vcs_lint.py" in r.stdout)
         if "vcs -full64" in r.stdout:
             assert "-debug" not in r.stdout and "+v2k" not in r.stdout, (name, "VCS builds stay plain")
-    assert set(na) == {n for n in TABLE if n.endswith("/vivado_tb")} | {k for k in VERILATOR_ONLY if "/" in k}, na
+    assert set(na) == {k for k in VERILATOR_ONLY if "/" in k}, na
     assert runs >= 40, runs  # the simulations and VCS lints; the Python-only points (ipu, fpu, truth, truefn, ...) need no simulator
     assert spec.argv("intMultiplier/verilator16", None) == ["make", "intMultiplier-vcs16", "SIM=vcs"]
     assert SPEC.argv("intMultiplier/verilator16", None) == ["make", "intMultiplier-verilator16"]  # Verilator as before
