@@ -8,6 +8,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "Common", "models"))
+import fourstate  # noqa: E402
 import ipu  # noqa: E402
 import truth  # noqa: E402
 
@@ -24,7 +25,12 @@ def main() -> None:
         print(f"[FAIL] {got.size} results for {v['acc'].size} rows")
         ok = False
         got = np.zeros(0, dtype=str)
-    q = np.array([int(x, 16) for x in got], dtype=np.int64)
+    try:  # a 4-state simulator's x or z in a word fails the test, named, rather than crashing int()
+        q = np.array(fourstate.words(got, os.path.basename(a.dump)), dtype=np.int64)
+    except fourstate.Unknown as e:
+        print(fourstate.fail_line(e))
+        print("RESULT: FAILED")
+        sys.exit(1)
     rs = []
     for i, k in enumerate(v["kinds"]):
         sel = v["kind"] == i

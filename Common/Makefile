@@ -38,6 +38,8 @@ dump32:
 
 ipu:
 	python3 $(PRJ_DIR)/models/test_ipu.py
+	python3 $(PRJ_DIR)/models/fourstate.py --selftest
+	python3 $(PRJ_DIR)/vcs_lint.py --selftest
 
 fpu:
 	python3 $(PRJ_DIR)/models/test_fpu.py

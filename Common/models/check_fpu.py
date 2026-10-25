@@ -7,6 +7,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fourstate  # noqa: E402
 import fpu  # noqa: E402
 
 
@@ -19,9 +20,14 @@ def main() -> None:
     a = p.parse_args()
     f = fpu.FORMATS[a.format]
     rows = [ln.split() for ln in open(a.dump) if ln.strip()]
+    test = f"{a.unit} {a.format} ({os.path.basename(a.dump)})"
+    try:  # a 4-state simulator's x or z in a word fails the test, named, rather than crashing int()
+        cols = [fourstate.column(rows, k, test, 2 if (a.unit != "narrow" and k == 3) else 16) for k in range(2 if a.unit == "narrow" else 4)]
+    except fourstate.Unknown as e:
+        print(fourstate.fail_line(e))
+        sys.exit(1)
     if a.unit == "narrow":
-        X = np.array([int(r[0], 16) for r in rows], dtype=np.int64)
-        Y = np.array([int(r[1], 16) for r in rows], dtype=np.int64)
+        X, Y = cols
         want = fpu.narrow(f, X)
         bad = np.nonzero(Y != want)[0]
         d = (f.w + 3) // 4
@@ -29,10 +35,7 @@ def main() -> None:
         for i in bad[:20]:
             print(f"  {X[i]:08x}: rtl {Y[i]:0{d}x}, model {want[i]:0{d}x}")
         sys.exit(1 if len(bad) or not rows else 0)
-    A = np.array([int(r[0], 16) for r in rows], dtype=np.int64)
-    B = np.array([int(r[1], 16) for r in rows], dtype=np.int64)
-    R = np.array([int(r[2], 16) for r in rows], dtype=np.int64)
-    FL = np.array([int(r[3], 2) for r in rows], dtype=np.int64)
+    A, B, R, FL = cols
     if a.unit == "mul":
         res, ov, un, inv = fpu.mul(f, A, B)
     else:
