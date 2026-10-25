@@ -33,7 +33,7 @@ module TB_bf16WideMultiplier #(
   int cyc = 0, t_issue = -1, lat = -1;
 
   function automatic bit is_nan32(input logic [PRODUCT_WIDTH-1:0] x);
-    return (x[30:23] == '1) && (x[22:0] != '0);
+    return (x[30:23] === '1) && (x[22:0] !== '0);
   endfunction
 
   task automatic drive(input logic [W-1:0] x, input logic [W-1:0] y);
@@ -65,8 +65,8 @@ module TB_bf16WideMultiplier #(
       end else begin
         t = q.pop_front();
         checked++;
-        result_ok = (res == t.res) || (is_nan32(t.res) && is_nan32(res));  // exact: no rounding tolerance
-        flags_ok = (ov == t.ov) && (inv == t.inv) && (un == t.un);
+        result_ok = (res === t.res) || (is_nan32(t.res) && is_nan32(res));  // exact: no rounding tolerance
+        flags_ok = (ov === t.ov) && (inv === t.inv) && (un === t.un);
         if (!result_ok || !flags_ok) begin
           errs++;
           if (errs <= 20)

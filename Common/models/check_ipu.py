@@ -7,6 +7,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fourstate  # noqa: E402
 import ipu  # noqa: E402
 
 UNITS = {"mul": (2, 8, 16), "mul16": (2, 16, 32), "add": (2, 32, 32)}  # operand count, operand width, result width
@@ -30,8 +31,13 @@ def model(unit: str, ops):
 def check_dump(path: str, unit: str, exhaustive: bool) -> int:
     n_ops, w, rw = UNITS[unit]
     rows = [ln.split() for ln in open(path) if ln.strip()]
-    ops = [signed([int(r[i], 16) for r in rows], w) for i in range(n_ops)]
-    got = np.array([int(r[n_ops], 16) for r in rows], dtype=np.int64)
+    try:  # a 4-state simulator's x or z in a word fails the test, named, rather than crashing int()
+        cols = [fourstate.column(rows, k, f"{unit} ({os.path.basename(path)})") for k in range(n_ops + 1)]
+    except fourstate.Unknown as e:
+        print(fourstate.fail_line(e))
+        return 1
+    ops = [signed(cols[i], w) for i in range(n_ops)]
+    got = cols[n_ops]
     want = model(unit, ops)
     bad = np.nonzero(got != want)[0]
     ok = len(rows) > 0 and len(bad) == 0

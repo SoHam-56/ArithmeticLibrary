@@ -11,13 +11,17 @@ import tempfile
 import time
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
-FIRING = re.compile(r"^.*(?:Assertion failed|%Error).*$", re.M)  # a firing assertion leaves the exit status clean, so the log is the witness
+FIRING = re.compile(r"^.*(?:Assertion failed|%Error).*$"
+                    r'|^(?:Error|Fatal): "[^"]*", \d+: .*$|^Error-\[.*$|^"[^"]*", \d+: \S+: started at .* failed at .*$', re.M)  # a firing assertion leaves the exit status clean, so the log is the witness; the second line is VCS's forms
+INNER_SKIP = re.compile(r"^\s*skipped: (.+)$", re.M)  # a part a point skips inside its run (e.g. a model whose input file is absent)
+XLINE = re.compile(r"^.*\bFAIL: [XZ] in .*$", re.M)  # a parser's line for an x or z in a word, count or hash (fourstate.py)
 INTERNAL = re.compile(r"^.*(?:%Error: Internal Error|%Error: Verilator internal fault|\bV3\w+\.(?:cpp|h):\d+).*$", re.M)  # Verilator's own crash, not the design's
 MAKE_VARS = ("MAKEFLAGS", "MAKELEVEL", "MFLAGS", "MAKEOVERRIDES", "SMALL", "FMT", "REG_DIR", "REG_RUN", "EXTRA_FLAGS", "SIM_ARGS",
-             "PLUSARGS", "TRACE", "OPT_FAST", "SIM_THREADS")  # a point checks the design as checked in, not the caller's variables
+             "PLUSARGS", "TRACE", "OPT_FAST", "SIM_THREADS", "SIM")  # a point checks the design as checked in, not the caller's variables
 COPY_SKIP_DIRS = (".git", "results", "__pycache__", "VCS")  # a tree without git: generated outputs a copy leaves out
 COPY_SKIP_PREFIX = ("Verilator",)
 SIZES, SIZES_SMALL = (8, 16, 32, 64), (8, 16)  # SMALL=1: what a 16 GB machine can build
+SIMS = ("verilator", "vcs")  # make regression SIM=<s>; a point's command names its simulator, the caller's SIM never reaches it
 
 
 class Spec:
@@ -29,6 +33,7 @@ class Spec:
     reported = frozenset()  # points shown in the table but not counted in the verdict
     drop = ()  # the repo's own make variables, kept from a point's environment
     artifacts = ("testbenches/results",)  # a failing point keeps these trees of its copy
+    sim = "verilator"  # main() sets the run's simulator
 
     def __init__(self, root: str, results: str):
         self.root, self.results = root, results
@@ -52,9 +57,24 @@ class Spec:
     def not_run(self, name: str, opts):
         return None
 
+    def skipped(self, name: str, opts):
+        """Why the point is skipped on this machine (an optional input absent, e.g. no MODEL_DIR), or None; listed and not gated, not a failure."""
+        return None
+
+    def not_applicable(self, name: str):
+        """Why the point has no meaning under self.sim (a Verilator-only check), or None; such a point is listed, never run, never gated."""
+        return None
+
+    def gated(self, name: str) -> bool:
+        """False for a point the table reports but the verdict does not count."""
+        return name not in self.reported
+
 
 def common_verdict(text: str, rc):
     """FAIL on a non-zero exit or a firing assertion / %Error line, else None (the point's own verdict decides)."""
+    x = XLINE.search(ANSI.sub("", text))
+    if x:
+        return f"FAIL ({x.group(0).strip()[x.group(0).strip().find('FAIL: ') + 6:][:70]})"
     if rc:
         return f"FAIL (exit {rc})"
     fired = FIRING.search(ANSI.sub("", text))
@@ -63,6 +83,9 @@ def common_verdict(text: str, rc):
 
 def marker_verdict(text: str, rc, need=(), bad=(), firing=True) -> str:
     """PASS when the exit and log are clean, every need pattern is in the log and no bad one is; the first unmet rule otherwise."""
+    x = XLINE.search(ANSI.sub("", text))
+    if x:
+        return common_verdict(text, rc)
     v = common_verdict(text, rc) if firing else (f"FAIL (exit {rc})" if rc else None)  # firing=False: a check whose log shows the error it provokes
     if v:
         return v
@@ -156,12 +179,22 @@ def run_point(spec: Spec, a) -> None:
         if os.path.exists(base + x):
             os.remove(base + x)
     shutil.rmtree(base + ".artifacts", ignore_errors=True)
-    rec = {"name": a.name, "run": a.run, "rc": None, "secs": 0.0, "not_run": spec.not_run(a.name, a),
+    na = spec.not_applicable(a.name)
+    skip = None if na else spec.skipped(a.name, a)
+    rec = {"name": a.name, "run": a.run, "rc": None, "secs": 0.0, "not_run": None if na else spec.not_run(a.name, a),
            "host": os.uname().nodename, "start": time.strftime("%Y-%m-%d %H:%M:%S")}
+    if spec.sim != "verilator":  # a Verilator result's record stays as it was
+        rec.update(sim=spec.sim, na=na)
+    if skip:
+        rec["skipped"] = skip
     t0 = time.time()
     with open(base + ".log", "w") as log:
-        log.write(f"# point {a.name}  run {a.run or '-'}  host {rec['host']}  start {rec['start']}\n")
-        if rec["not_run"]:
+        log.write(f"# point {a.name}  run {a.run or '-'}  host {rec['host']}  start {rec['start']}" + (f"  sim {spec.sim}" if spec.sim != "verilator" else "") + "\n")
+        if na:
+            log.write(f"NOT APPLICABLE TO {spec.sim.upper()}: {na}\n")
+        elif skip:
+            log.write(f"skipped: {skip}\n")
+        elif rec["not_run"]:
             log.write(f"NOT RUN: {rec['not_run']}\n")
         else:
             cmd, env = spec.argv(a.name, a), point_env(spec, a.name)
@@ -188,9 +221,10 @@ def run_point(spec: Spec, a) -> None:
         rec["secs"] = round(time.time() - t0, 1)
         log.write(f"# exit {rec['rc']} after {rec['secs']} s\n")
     json.dump(rec, open(base + ".json", "w"))
-    v = f"NOT RUN ({rec['not_run']})" if rec["not_run"] else spec.verdict(a.name, open(base + ".log", errors="replace").read(), rec["rc"])
+    v = (f"N/A ({na})" if na else f"SKIPPED ({skip})" if skip else f"NOT RUN ({rec['not_run']})" if rec["not_run"]
+         else spec.verdict(a.name, open(base + ".log", errors="replace").read(), rec["rc"]))
     print(f"{a.name}: {v}  {rec['secs']:.0f} s  {base}.log", flush=True)
-    sys.exit(0 if v == "PASS" or a.keep_going else 1)
+    sys.exit(0 if v == "PASS" or na or skip or a.keep_going else 1)
 
 
 def _attempt(spec: Spec, a, base: str, cmd: list, env: dict, log, rec: dict) -> None:
@@ -219,23 +253,31 @@ def summary(spec: Spec, a) -> None:
     if not pts:
         print(f"{spec.title} FAIL: no points selected")
         sys.exit(1)
-    res, rows = os.path.abspath(a.results), []
+    res, rows, inner = os.path.abspath(a.results), [], set()
     for p in pts:
         base = os.path.join(res, p)
         try:
             rec = json.load(open(base + ".json"))
         except (OSError, ValueError):
             rec = None
-        if rec is None:
+        na = spec.not_applicable(p)
+        if na:  # listed, so the table shows every point, but never run and never gated
+            v, secs = f"N/A ({na})", 0.0
+        elif rec is None:
             v, secs = f"NOT RUN (no result in {res})", 0.0
+        elif rec.get("sim", "verilator") != spec.sim:
+            v, secs = f"NOT RUN (stale: a {rec.get('sim', 'verilator')} result, not {spec.sim})", rec.get("secs", 0.0)
         elif a.run and rec.get("run") != a.run:
             v, secs = f"NOT RUN (stale: result of run {rec.get('run') or '-'}, not {a.run})", rec.get("secs", 0.0)
+        elif rec.get("skipped"):
+            v, secs = f"SKIPPED ({rec['skipped']})", 0.0
         elif rec.get("not_run"):
             v, secs = f"NOT RUN ({rec['not_run']})", 0.0
         else:
             text = open(base + ".log", errors="replace").read() if os.path.exists(base + ".log") else ""
             v, secs = (spec.verdict(p, text, rec.get("rc")) if text else "NOT RUN (result without its log)"), rec.get("secs", 0.0)
-        rows.append((p, v, p not in spec.reported, secs, base + ".log" + ("  (retried once after a Verilator internal error)" if rec and rec.get("retried") else ""),
+            inner.update(x.strip() for x in INNER_SKIP.findall(ANSI.sub("", text)) if v == "PASS")  # what a passing point left out inside its run
+        rows.append((p, v, spec.gated(p) and not v.startswith(("N/A", "SKIPPED")), secs, base + ".log" + ("  (retried once after a Verilator internal error)" if rec and rec.get("retried") else ""),
                      rec is not None))
     gated = [r for r in rows if r[2]]
     passed = sum(r[1] == "PASS" for r in gated)
@@ -243,15 +285,20 @@ def summary(spec: Spec, a) -> None:
     not_run = sum(r[1].startswith("NOT RUN") for r in gated)
     sel = ("N = 8, 16" if a.small else "N = 8 to 64") + ", every tile size" if spec.sized else ""
     sel += (", " if sel else "") + " ".join(fmts) if spec.formats else ""
+    sel += (", " if sel else "") + f"simulator {spec.sim}" if spec.sim != "verilator" else ""
     w, vw = max(len(p) for p in pts) + 2, max([len(r[1]) + 22 for r in rows] + [40])
     table = [f"{spec.title}: {sel + '; ' if sel else ''}run {a.run or 'any'}; {len(pts)} points", f"{'point':<{w}}{'verdict':<{vw}}{'secs':>9}  log"]
-    table += [f"{p:<{w}}{(v if g else v + ', reported, not gated'):<{vw}}{s:9.1f}  {lp}" for p, v, g, s, lp, _ in rows]
+    table += [f"{p:<{w}}{(v if g or v.startswith(('N/A', 'SKIPPED')) else v + ', reported, not gated'):<{vw}}{s:9.1f}  {lp}" for p, v, g, s, lp, _ in rows]
     ok_all = bool(gated) and passed == len(gated)
     last = f"{spec.title} {'PASS' if ok_all else 'FAIL'}: {passed} of {len(gated)} gated points passed"
     last += (f", {failed} FAIL" if failed else "") + (f", {not_run} NOT RUN" if not_run else "") + (" (no point ran)" if not any(r[5] for r in rows) else "")
-    last += f"; {len(rows) - len(gated)} reported, not gated" if len(rows) > len(gated) else ""
+    n_na, n_sk = sum(r[1].startswith("N/A") for r in rows), sum(r[1].startswith("SKIPPED") for r in rows)
+    last += f"; {len(rows) - len(gated) - n_na - n_sk} reported, not gated" if len(rows) - len(gated) - n_na - n_sk else ""
+    last += f"; {n_na} not applicable to {spec.sim}" if n_na else ""
+    last += f"; {n_sk} skipped" if n_sk else ""
     hints = sorted({r[1][9:-1] for r in rows if r[1].startswith("NOT RUN (") and "no result" not in r[1] and "stale" not in r[1] and "without its log" not in r[1]})
-    table += [f"not run: {h}" for h in hints] + [last]
+    skips = sorted({r[1][9:-1] for r in rows if r[1].startswith("SKIPPED (")})
+    table += [f"not run: {h}" for h in hints] + [f"skipped: {h}" for h in skips] + [f"skipped inside passing points: {h}" for h in sorted(inner)] + [last]
     os.makedirs(res, exist_ok=True)
     open(os.path.join(res, "regression.log"), "w").write("\n".join(table) + "\n")
     print("\n".join(table) + f"\ntable: {os.path.join(res, 'regression.log')}")
@@ -269,7 +316,9 @@ def main(spec: Spec, argv=None) -> None:
     ap.add_argument("--small", action="store_true", help="N = 8 and 16 only")
     ap.add_argument("--formats", default=None, help="comma-separated formats (default: every format)")
     ap.add_argument("--model-dir", default="", help="points that need a model directory")
+    ap.add_argument("--sim", choices=SIMS, default="verilator", help="the simulator every point builds and runs with (make regression SIM=<s>)")
     a = ap.parse_args(argv)
+    spec.sim = a.sim
     a.model_dir = os.path.abspath(a.model_dir) if a.model_dir else ""  # a point runs in a private copy, where a relative path names nothing
     if a.action == "points":
         print("\n".join(spec.points(a.small, _formats(spec, a.formats))))

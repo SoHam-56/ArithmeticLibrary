@@ -12,6 +12,7 @@ V       = $(PRJ_DIR)/Verilator
 PYTHON ?= python3
 N      ?= 200000
 include $(COMMON)/fmt.mk
+include $(COMMON)/sim.mk
 $(shell mkdir -p $(V))  # Verilator makes --Mdir but not its parent
 
 PKG = $(COMMON)/src/sienna_fmt_pkg.sv  # the package with its define map
@@ -68,7 +69,17 @@ help:
 	@echo "  make equiv            - each per-width integer unit equals the generic unit it replaces (equiv.py; every core)"
 	@echo "  make eq-build TOP=<eq top> BITS=<n> [COMB=1] - one equivalence harness"
 
-# ── one point: lint (0 library warnings, 0 errors), then TB_fmt ──
+# ── one point: lint (0 library warnings, 0 errors), then TB_fmt; under VCS TB_fmt only (the lint is Verilator's, its baseline Verilator's warnings) ──
+ifeq ($(SIM),vcs)
+define point
+$(1):
+	@echo "lint $(1): not applicable to VCS (verilator --lint-only against lint_baseline.txt; the unit lint points run VCS's +lint=all)"
+	@d=$$(PRJ_DIR)/VCS/tb_$(1); rm -rf $$$$d; \
+	$$(call vcs_build,TB_fmt,$$$$d,$$(SRC) $$(TB_DIR)/TB_fmt.sv,+define+FMT_$(shell echo $(2) | tr a-z A-Z) +incdir+$$(COMMON)/src $$(call vcs_g,TB_fmt,-GKIND='"$(3)"' $(4))) \
+	  > $$$$d.build.log 2>&1 || { echo "TB_fmt $(1): BUILD FAILED"; tail -30 $$$$d.build.log; exit 1; }; \
+	$$$$d/sim +N=$$(N) +SEED=1 $$(VCS_RUN)
+endef
+else
 define point
 $(1):
 	@log=$$(V)/lint_$(1).log; verilator --lint-only -Wall -Wno-fatal -DSYNTHESIS +define+FMT_$(shell echo $(2) | tr a-z A-Z) $$(INC) $(5) \
@@ -79,6 +90,7 @@ $(1):
 	  > $$$$d.build.log 2>&1 || { echo "TB_fmt $(1): BUILD FAILED"; tail -30 $$$$d.build.log; exit 1; }; \
 	$$$$d/sim +N=$$(N) +SEED=1
 endef
+endif
 field = $(subst ~, ,$(word $(2),$(subst |, ,$(1))))
 $(foreach p,$(POINTS),$(eval $(call point,$(call field,$(p),1),$(call field,$(p),2),$(call field,$(p),3),$(call field,$(p),4),$(call field,$(p),5))))
 

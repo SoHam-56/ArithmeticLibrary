@@ -82,6 +82,26 @@ CREDIT_OK = 11  # TB_credit_link: 8 (STAGES, MODE) runs and 3 $fatal modes, one 
 LINT_RUNS = {"Adders/Int/lint": 1, "Multipliers/Int/lint": 2, "Requantizer/lint": 2, "QuantizedAdder/lint": 2}  # Common/lint.sh lines each lint prints, one per configuration
 LINT_RUNS.update({f"{u}/lint": 1 for u, *_ in NEW_UNITS})
 TABLE = {f"{u}/{t}": (u, t, need, bad, firing) for u, t, need, bad, firing in POINTS}
+# ── SIM=vcs: each point's VCS target, the Verilator-only points, and the VCS lint labels ──
+VCS_TARGET = {"verilator": "vcs", "verilator16": "vcs16"}  # the reference benches' VCS targets; every other target takes SIM=vcs itself
+VERILATOR_ONLY = {  # point (or target) -> why it means nothing under VCS
+    "vivado_tb": "a Vivado bench, run here on Verilator; the Vivado removal takes it out",
+    "Fmt/controls": "Verilator's lint and preprocessor messages and its C++ sweep harness (sweep_fmt.cpp) are what it checks",
+    "Fmt/mutants": "each kill is judged by TB_fmt and by a Verilator C++ sweep harness (sweep_fmt.cpp drives a Verilated model)",
+    "Fmt/lint_tops": "verilator --lint-only against Verilator's recorded lint baseline; the unit lint points run VCS's +lint=all",
+    "Fmt/equiv_quick": "a Verilator C++ harness (eq_fmt.cpp drives Verilated models)",
+}
+VCS_LINT_LABELS = {"Adders/Int/lint": ("intAdder",), "Multipliers/Int/lint": ("intMultiplier W=8", "intMultiplier W=16"),
+                   "Requantizer/lint": ("int8Requantizer", "int8Requantizer (assertions)"),
+                   "QuantizedAdder/lint": ("int8QuantizedAdder", "int8QuantizedAdder (assertions)")}
+VCS_LINT_LABELS.update({f"{u}/lint": (top,) for u, top, _ in NEW_UNITS})
+VCS_LINT_BASELINE = os.path.join(ROOT, "vcs_lint_baseline.txt")  # written by make -C <unit> lint SIM=vcs RECORD=1 on a real VCS run
+
+
+def vcs_lint_recorded(labels, path=VCS_LINT_BASELINE):
+    """True when the baseline holds every label: until then a VCS lint point is reported, not gated."""
+    have = {ln.split("\t")[0] for ln in open(path) if ln.strip() and not ln.startswith("#")} if os.path.exists(path) else set()
+    return all(x in have for x in labels)
 
 
 class ArilSpec(regress.Spec):
@@ -101,16 +121,47 @@ class ArilSpec(regress.Spec):
         if name == "selftest":
             return [sys.executable, "regression.py", "--action", "selftest"]
         u, t = TABLE[name][:2]
+        if self.sim == "vcs":
+            return ["make", "-C", u, VCS_TARGET.get(t, t), "SIM=vcs"]
         return ["make", "-C", u, t]
+
+    def not_applicable(self, name):
+        if self.sim != "vcs" or name == "selftest":
+            return None
+        return VERILATOR_ONLY.get(name) or VERILATOR_ONLY.get(TABLE[name][1])
+
+    def gated(self, name):
+        return not (self.sim == "vcs" and name in VCS_LINT_LABELS and not vcs_lint_recorded(VCS_LINT_LABELS[name]))
 
     def verdict(self, name, text, rc):
         if name == "selftest":
             return regress.marker_verdict(text, rc, need=(r"^ALL \d+ PASSED$",))
         _, t, need, bad, firing = TABLE[name]
+        if self.sim == "vcs":
+            return self.vcs_verdict(name, text, rc)
         v = regress.marker_verdict(text, rc, need, bad, firing)
         if v == "PASS" and name in LINT_RUNS:  # a clean exit is not a lint: each configuration's count line, with 0 errors
             n = len(re.findall(r"^lint .*: \d+ warnings, 0 errors$", regress.ANSI.sub("", text), re.M))
             v = "PASS" if n == LINT_RUNS[name] else f"FAIL ({n} of {LINT_RUNS[name]} lint runs counted)"
+        if v == "PASS" and t == "credit":
+            n = len([x for x in regress.ANSI.sub("", text).splitlines() if x.startswith("credit OK: ")])
+            v = "PASS" if n == CREDIT_OK else f"FAIL ({n} of {CREDIT_OK} credit checks passed)"
+        return v
+
+
+    def vcs_verdict(self, name, text, rc):
+        """The Verilator gate less what only Verilator prints: a VCS lint's own count lines, credit's lint line, the Fmt points' lint line."""
+        u, t, need, bad, firing = TABLE[name]
+        if name in VCS_LINT_LABELS:
+            v = regress.marker_verdict(text, rc, (), (r"NEW WARNING", r"^vcs lint .*: FAIL"), True)
+            labels = re.findall(r"^vcs lint (.+): \d+ warnings, 0 errors$", regress.ANSI.sub("", text), re.M)
+            want = VCS_LINT_LABELS[name]
+            return v if v != "PASS" else ("PASS" if sorted(labels) == sorted(want) else f"FAIL ({len(labels)} of {len(want)} VCS lint runs counted)")
+        if t == "credit":
+            need = (r"^credit lint: not applicable to VCS",)
+        if u == "Fmt" and t in FMT_POINTS:
+            need = TB + (rf"^lint {t}: not applicable to VCS",)
+        v = regress.marker_verdict(text, rc, need, bad, firing)
         if v == "PASS" and t == "credit":
             n = len([x for x in regress.ANSI.sub("", text).splitlines() if x.startswith("credit OK: ")])
             v = "PASS" if n == CREDIT_OK else f"FAIL ({n} of {CREDIT_OK} credit checks passed)"
@@ -355,11 +406,11 @@ def test_point_drops_unit_variables():
 
 @selftest
 def test_make_echo_does_not_fire_the_scan():
-    """No point of a unit with a SIM gate prints a command line that regress.py's firing scan (Assertion failed, %Error) matches: the gate spells them [f] and [E]. (make -n also lists @-silenced lines, so units without a gate are left out.)"""
+    """No point of a unit with a RUN_CHECKED gate prints a command line that regress.py's firing scan (Assertion failed, %Error) matches: the gate spells them [f] and [E]. (make -n also lists @-silenced lines, so units without a gate are left out.)"""
     bad = []
     for name in SPEC.points(False, [])[1:]:
         u, t = TABLE[name][:2]
-        if not re.search(r"(?m)^SIM\s*=", open(os.path.join(ROOT, u, "Makefile")).read()):
+        if not re.search(r"(?m)^RUN_CHECKED\s*=", open(os.path.join(ROOT, u, "Makefile")).read()):
             continue
         r = subprocess.run(["make", "-n", "-C", os.path.join(ROOT, u), t], capture_output=True, text=True, env={k: v for k, v in os.environ.items() if not k.startswith("MAKE")})
         m = regress.FIRING.search(r.stdout)
@@ -546,6 +597,116 @@ def test_regression_target():
     assert len(one) == 1 and "--name Requantizer/lint" in one[0] and "--keep-going" not in one[0] and "--run" not in one[0], one
     s = run("regression-summary").stdout.splitlines()
     assert len(s) == 1 and "--action summary" in s[0] and "--run" not in s[0], s
+
+
+def _vcs_spec():
+    spec = ArilSpec(ROOT, "")
+    spec.sim = "vcs"
+    return spec
+
+
+@selftest
+def test_vcs_points_name_vcs():
+    """Under SIM=vcs every point is N/A with a reason, a simulator-free check, or a make whose make -n names vcs and never verilator."""
+    spec, env = _vcs_spec(), {k: v for k, v in os.environ.items() if not k.startswith("MAKE") and k != "SIM"}
+    na, runs = [], 0
+    for name in spec.points(False, []):
+        if spec.not_applicable(name):
+            na.append(name)
+            continue
+        argv = spec.argv(name, None)
+        if argv[0] != "make":
+            continue
+        assert argv[-1] == "SIM=vcs", (name, argv)
+        r = subprocess.run(argv[:1] + ["-n", "-s"] + argv[1:], cwd=ROOT, capture_output=True, text=True, env=env)
+        assert r.returncode == 0, (name, r.stderr[-300:])
+        assert not re.search(r"(?m)^\s*verilator ", r.stdout) and "lint.sh" not in r.stdout, (name, r.stdout[-400:])
+        runs += bool(re.search(r"(?m)(^|&& )vcs -full64 ", r.stdout) or "vcs_lint.py" in r.stdout)
+        if "vcs -full64" in r.stdout:
+            assert "-debug" not in r.stdout and "+v2k" not in r.stdout, (name, "VCS builds stay plain")
+    assert set(na) == {n for n in TABLE if n.endswith("/vivado_tb")} | {k for k in VERILATOR_ONLY if "/" in k}, na
+    assert runs >= 40, runs  # the simulations and VCS lints; the Python-only points (ipu, fpu, truth, truefn, ...) need no simulator
+    assert spec.argv("Multipliers/Int/verilator16", None) == ["make", "-C", "Multipliers/Int", "vcs16", "SIM=vcs"]
+    assert SPEC.argv("Multipliers/Int/verilator16", None) == ["make", "-C", "Multipliers/Int", "verilator16"]  # Verilator as before
+    r = subprocess.run(["make", "-s", "-n", "-C", "Multipliers/BF16", "vcs", "TRACE=1"], cwd=ROOT, capture_output=True, text=True, env=env)
+    assert "-debug_access+all +define+ENABLE_TRACE" in r.stdout and "+vcs+dumpvarsoff" not in r.stdout, r.stdout[-300:]  # waveforms only with TRACE=1
+    r = subprocess.run(["make", "-s", "-n", "-C", "Multipliers/BF16", "vcs", "RANDINIT=1", "SEED=7", "XPROP=1"], cwd=ROOT, capture_output=True, text=True, env=env)
+    assert "+vcs+initreg+random +define+NO_ZERO_INIT" in r.stdout and "./sim +vcs+initreg+7 " in r.stdout and "-xprop=tmerge" in r.stdout, r.stdout[-400:]
+    r = subprocess.run(["make", "-s", "-n", "-C", "Multipliers/BF16", "vcs", "SIM=verilator"], cwd=ROOT, capture_output=True, text=True, env=env)
+    assert r.returncode != 0 and "contradicts" in r.stderr, r.stderr
+    r = subprocess.run(["make", "-s", "-n", "-C", "Multipliers/BF16", "verilator", "SIM=questa"], cwd=ROOT, capture_output=True, text=True, env=env)
+    assert r.returncode != 0 and "SIM=questa: not one of verilator vcs" in r.stderr, r.stderr
+
+
+@selftest
+def test_vcs_verdicts():
+    """The VCS gates: an x word fails with its line, a VCS assertion fires the scan, a VCS lint reports until its baseline is recorded."""
+    spec = _vcs_spec()
+    v = spec.verdict
+    assert v("Adders/Int/check", "RESULT: PASSED\nFAIL: X in output word 37 of test add (add_int32.txt) ('xxxxxxxx')\nRESULT: FAILED\n", 1) \
+        == "FAIL (X in output word 37 of test add (add_int32.txt) ('xxxxxxxx'))"
+    assert SPEC.verdict("Adders/Int/check", "FAIL: Z in output word 2 of test t\n", 0).startswith("FAIL (Z in output word 2")  # Verilator's gate too
+    assert v("Multipliers/Int8/verilator", "int8Multiplier: 65536 pairs, 0 errors\nRESULT: PASSED\n", 0) == "PASS"
+    fired = 'Error: "/t/src/credit_counter.sv", 25: TB.u.a_no_underflow: at time 105 ns\n'
+    assert v("Multipliers/Int8/verilator", "int8Multiplier: 65536 pairs, 0 errors\nRESULT: PASSED\n" + fired, 0).startswith("FAIL (log: Error:")
+    assert v("Adders/Int/verilator", 'RESULT: PASSED\n"/t/a.sv", 9: TB.a1: started at 5ns failed at 5ns\n', 0).startswith("FAIL (log:")
+    assert v("Adders/Int/verilator", "RESULT: PASSED\nError-[DPI-DIFNF] DPI function not found\n", 0).startswith("FAIL (log: Error-[")
+    ok = "credit lint: not applicable to VCS (verilator --lint-only -Wall)\n" + "credit OK: m\n" * CREDIT_OK
+    assert v("Common/credit", ok, 0) == "PASS" and v("Common/credit", ok.replace("credit OK: m\n", "", 1), 0).startswith("FAIL (10 of 11")
+    fmt = "lint mul_fp32: not applicable to VCS (x)\nTB_fmt mul fp32: 200000 vectors, 0 word errors\nRESULT: PASSED\n"
+    assert v("Fmt/mul_fp32", fmt, 0) == "PASS" and v("Fmt/mul_fp32", fmt.split("\n", 1)[1], 0).startswith("FAIL (no 'lint mul_fp32")
+    lint = "vcs lint intMultiplier W=8: 3 warnings, 0 errors\nvcs lint intMultiplier W=16: 2 warnings, 0 errors\n"
+    assert v("Multipliers/Int/lint", lint, 0) == "PASS" and v("Multipliers/Int/lint", lint.split("\n")[0] + "\n", 0).startswith("FAIL (1 of 2")
+    assert v("Multipliers/Int/lint", lint + "vcs lint intMultiplier W=8: NEW WARNING PCWM-L in intMultiplier.sv: 2 against 1 recorded\n", 1).startswith("FAIL")
+    with tempfile.TemporaryDirectory() as d:
+        b = os.path.join(d, "b.txt")
+        assert not vcs_lint_recorded(("intAdder",), b)
+        open(b, "w").write("# header\nintAdder\t-\t-\t0\n")
+        assert vcs_lint_recorded(("intAdder",), b) and not vcs_lint_recorded(("intMultiplier W=8",), b)
+    assert spec.gated("Adders/Int/check") and (spec.gated("Adders/Int/lint") == vcs_lint_recorded(("intAdder",))) and SPEC.gated("Adders/Int/lint")
+
+
+@selftest
+def test_vcs_summary_and_skips():
+    """The table under SIM=vcs: N/A rows listed and not gated, a Verilator result stale, skipped points listed and not failing."""
+    class S(FakeSpec):
+        def not_applicable(self, name):
+            return "Verilator-only" if self.sim == "vcs" and name.endswith("/mod") else None
+
+        def skipped(self, name, opts):
+            return "no MODEL_DIR" if name == "f2/N8_T2/run" and not opts.model_dir else None
+    spec = S(ROOT, "")
+    pts = spec.points(True, ["f1", "f2"])
+    with tempfile.TemporaryDirectory() as d:
+        _fake_results(spec, d, pts)
+        spec.sim = "vcs"
+        code, _ = _exit(regress.summary, spec, _args(action="summary", results=d, small=True, run="r1"))
+        t = open(os.path.join(d, "regression.log")).read()
+        assert code == 1 and "NOT RUN (stale: a verilator result, not vcs)" in t and "N/A (Verilator-only)" in t and "simulator vcs" in t.splitlines()[0], t
+        assert "; 2 not applicable to vcs" in t.splitlines()[-1], t.splitlines()[-1]
+        for p in pts:
+            if not p.endswith("/mod"):
+                rec = json.load(open(os.path.join(d, p + ".json")))
+                json.dump(dict(rec, sim="vcs"), open(os.path.join(d, p + ".json"), "w"))
+        code, _ = _exit(regress.summary, spec, _args(action="summary", results=d, small=True, run="r1"))
+        t = open(os.path.join(d, "regression.log")).read()
+        assert code == 0 and "FAKE REGRESSION PASS: 2 of 2 gated points passed; 1 reported, not gated; 2 not applicable to vcs" in t, t
+        open(os.path.join(d, "f1/N8_T2/run.log"), "a").write("  skipped: model kws: marvin.wav not in /m (copy it)\n")
+        _exit(regress.summary, spec, _args(action="summary", results=d, small=True, run="r1"))
+        t = open(os.path.join(d, "regression.log")).read()
+        assert t.splitlines()[-2] == "skipped inside passing points: model kws: marvin.wav not in /m (copy it)", t  # what a point left out is listed
+    with tempfile.TemporaryDirectory() as d:
+        src = os.path.join(d, "tree")
+        os.makedirs(src)
+        spec = S(src, d)
+        code, out = _exit(regress.run_point, spec, _args(name="f2/N8_T2/run", results=d, run="r1", probe="print('ok')"))
+        rec = json.load(open(os.path.join(d, "f2/N8_T2/run.json")))
+        assert code == 0 and rec["skipped"] == "no MODEL_DIR" and "SKIPPED (no MODEL_DIR)" in out, (code, rec, out)
+        assert "skipped: no MODEL_DIR" in open(os.path.join(d, "f2/N8_T2/run.log")).read()
+        spec.sim = "vcs"
+        code, out = _exit(regress.run_point, spec, _args(name="f1/N8_T2/mod", results=d, run="r1", probe="print('ok')"))
+        rec = json.load(open(os.path.join(d, "f1/N8_T2/mod.json")))
+        assert code == 0 and rec["na"] == "Verilator-only" and rec["sim"] == "vcs" and "N/A (Verilator-only)" in out, (rec, out)
 
 
 def selftest_main() -> None:

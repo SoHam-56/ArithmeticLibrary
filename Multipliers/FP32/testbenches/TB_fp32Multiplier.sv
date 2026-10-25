@@ -122,30 +122,30 @@ module TB_fp32Multiplier;
 
         // [FIXED] Allow Flush-to-Zero vs Denormal Mismatch (Handling +/- Zero)
         // Check if DUT result is Zero (ignoring sign bit) AND SoftFloat expected a Denormal
-        if (underflow_dut && (result_dut[30:0] == 0) && (exp.expected_res[30:23] == 0)) begin
+        if (underflow_dut && (result_dut[30:0] === 0) && (exp.expected_res[30:23] == 0)) begin
           result_match = 1;
         end  // Check for NaN 
         else if ((exp.expected_res[30:23] == 255) && (exp.expected_res[22:0] != 0)) begin
-          if ((result_dut[30:23] == 255) && (result_dut[22:0] != 0)) result_match = 1;
+          if ((result_dut[30:23] === 255) && (result_dut[22:0] !== 0)) result_match = 1;
         end  // Exact Match
-        else if (result_dut == exp.expected_res) begin
+        else if (result_dut === exp.expected_res) begin
           result_match = 1;
         end  // Tolerance check
         else begin
           diff = int'(result_dut) - int'(exp.expected_res);
           if (diff < 0) diff = -diff;
-          if (diff <= 2) result_match = 1;
+          if (diff <= 2 && !$isunknown(result_dut)) result_match = 1;  // an x or z result never passes by its ULP distance
         end
 
         // --- CHECK 2: Exception Flags ---
         flags_match = 1;
-        if (overflow_dut != exp.exp_overflow) flags_match = 0;
+        if (overflow_dut !== exp.exp_overflow) flags_match = 0;
 
         // [FIXED] Ignore underflow mismatch if we flushed to zero successfully
-        if (underflow_dut != exp.exp_underflow && !(underflow_dut && result_dut[30:0] == 0))
+        if (underflow_dut !== exp.exp_underflow && !(underflow_dut && result_dut[30:0] === 0))
           flags_match = 0;
 
-        if (invalid_dut != exp.exp_invalid) flags_match = 0;
+        if (invalid_dut !== exp.exp_invalid) flags_match = 0;
 
         // --- ERROR REPORTING ---
         if (!result_match || !flags_match) begin

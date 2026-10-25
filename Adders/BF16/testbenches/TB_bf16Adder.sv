@@ -39,7 +39,7 @@ module TB_bf16Adder #(
   endfunction
 
   function automatic bit is_nan(input logic [W-1:0] x);
-    return (x[W-2:MAN_W] == '1) && (x[MAN_W-1:0] != '0);
+    return (x[W-2:MAN_W] === '1) && (x[MAN_W-1:0] !== '0);
   endfunction
 
   task automatic drive(input logic [W-1:0] x, input logic [W-1:0] y);
@@ -74,9 +74,9 @@ module TB_bf16Adder #(
         checked++;
         diff = int'(ordered_value(res) - ordered_value(t.res));
         if (diff < 0) diff = -diff;
-        result_ok = (res == t.res) || (is_nan(t.res) && is_nan(res)) || (!is_nan(t.res) && diff <= ULP_TOLERANCE) ||
-             (un && res[W-2:0] == '0 && t.res[W-2:MAN_W] == '0);
-        flags_ok = (ov == t.ov) && (inv == t.inv) && ((un == t.un) || (un && res[W-2:0] == '0));
+        result_ok = !$isunknown(res) && ((res === t.res) || (is_nan(t.res) && is_nan(res)) || (!is_nan(t.res) && diff <= ULP_TOLERANCE) ||
+             (un && res[W-2:0] === '0 && t.res[W-2:MAN_W] === '0));  // an x or z result never passes, not even by its ULP distance
+        flags_ok = (ov === t.ov) && (inv === t.inv) && ((un === t.un) || (un && res[W-2:0] === '0));
         if (!result_ok || !flags_ok) begin
           errs++;
           if (errs <= 20)

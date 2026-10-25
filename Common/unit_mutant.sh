@@ -2,7 +2,8 @@
 # One planted fault against a unit's own bench: copies SRC, applies SEDFILE, runs the bench command on the copy (make variables UNIT_SRC and
 # BENCH_DIR appended), and passes only when the bench prints RESULT: FAILED; args: NAME SRC SEDFILE then the bench command.
 name=$1 src=$2 sedf=$3; shift 3
-d=$(cd "$(dirname "$src")/.." && pwd)/Verilator/mutant_$name
+tree=Verilator; for a in "$@"; do [ "$a" = SIM=vcs ] && tree=VCS; done  # the bench command's simulator picks the build tree
+d=$(cd "$(dirname "$src")/.." && pwd)/$tree/mutant_$name
 rm -rf "$d" && mkdir -p "$d" || exit 1
 m="$d/$(basename "$src")"
 cp "$src" "$m" && sed -i -f "$sedf" "$m" || exit 1

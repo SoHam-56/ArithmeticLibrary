@@ -104,24 +104,24 @@ module TB_fp32Adder;
         result_match = 0;
 
         // Exact Match
-        if (result_dut == exp.expected_res) begin
+        if (result_dut === exp.expected_res) begin
           result_match = 1;
         end  // NaN Matching (All NaNs are treated equal for verification)
         else if ((exp.expected_res[30:23] == 255) && (exp.expected_res[22:0] != 0)) begin
-          if ((result_dut[30:23] == 255) && (result_dut[22:0] != 0)) result_match = 1;
+          if ((result_dut[30:23] === 255) && (result_dut[22:0] !== 0)) result_match = 1;
         end  // Tolerance Check (Allow +/- 3 ULP)
         else begin
           diff = int'(result_dut) - int'(exp.expected_res);
           if (diff < 0) diff = -diff;
-          if (diff <= 3) result_match = 1;
+          if (diff <= 3 && !$isunknown(result_dut)) result_match = 1;  // an x or z result never passes by its ULP distance
         end
 
         // --- Check Exception Flags ---
         flags_match = 1;
-        if (overflow_dut != exp.exp_overflow) flags_match = 0;
-        if (invalid_dut != exp.exp_invalid) flags_match = 0;
+        if (overflow_dut !== exp.exp_overflow) flags_match = 0;
+        if (invalid_dut !== exp.exp_invalid) flags_match = 0;
         // Strict Underflow Check (Since model now handles FTZ explicitly)
-        if (underflow_dut != exp.exp_underflow) flags_match = 0;
+        if (underflow_dut !== exp.exp_underflow) flags_match = 0;
 
         // --- ERROR REPORTING ---
         if (!result_match || !flags_match) begin

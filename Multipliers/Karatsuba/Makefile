@@ -43,16 +43,9 @@ VERILATOR_FLAGS = \
 		--Wno-IMPLICITSTATIC
 
 
-VCS_FLAGS = \
-    -full64 \
-    -sverilog \
-    -debug_all \
-    -timescale=1ns/1ps \
-    -Mdir=$(VCS_DIR) \
-    +v2k \
-    +incdir+$(SRC_DIR) \
-    +incdir+$(TB_DIR) \
-    +define+VCS
+# VCS: sim.mk's plain build (4-state, no debug access, no waveform unless TRACE=1), the sources' include paths
+include $(PRJ_DIR)/../../Common/sim.mk
+VCS_FLAGS = +incdir+$(SRC_DIR) +incdir+$(TB_DIR)
 
 default: help
 
@@ -95,13 +88,9 @@ verilator: check-files
 
 vcs: check-files
 	@echo "=== VCS simulation for $(TOP_MODULE) ==="
-	@mkdir -p $(VCS_DIR)
-	$(VCS) $(VCS_FLAGS) \
-		-o $(VCS_DIR)/$(TOP_MODULE)_sim \
-		$(DESIGN_FILES) \
-		$(TB_DIR)/$(TESTBENCH)
+	$(call vcs_build,$(TOP_MODULE),$(VCS_DIR),$(DESIGN_FILES) $(TB_DIR)/$(TESTBENCH),$(VCS_FLAGS))
 	@echo "-- Running VCS simulation"
-	cd $(VCS_DIR) && ./$(TOP_MODULE)_sim
+	cd $(VCS_DIR) && ./sim $(VCS_RUN)
 	@echo "=== VCS simulation complete ==="
 
 wave:

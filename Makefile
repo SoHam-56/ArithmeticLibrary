@@ -2,8 +2,10 @@ SHELL := /bin/bash
 # make regression: every unit bench and model check once, each its own target (make -j runs them side by side), then one table.
 PYTHON  ?= python3
 include $(CURDIR)/Common/fmt.mk
+# SIM ?= verilator; SIM=vcs builds and runs every point VCS can run (Common/sim.mk), the rest are listed as not applicable
+include $(CURDIR)/Common/sim.mk
 REG_DIR ?= $(CURDIR)/results/regression
-REG_SUMMARY = $(PYTHON) regression.py --action summary --results $(REG_DIR)
+REG_SUMMARY = $(PYTHON) regression.py --action summary --results $(REG_DIR) --sim $(SIM)
 ifneq ($(filter regression,$(MAKECMDGOALS)),)
 ifeq ($(origin REG_RUN),undefined)
 REG_RUN := $(shell date +%Y%m%d-%H%M%S)-$(shell echo $$PPID)
@@ -21,12 +23,13 @@ help:
 	@echo "                               is_fp32, from_fp32, widen()"
 	@echo "  make exhaustive FMT=<f>    - the unit sweeps of the restructure's gate table for one format (Fmt/sweep.py, every core)"
 	@echo "  make equiv                 - each per-width integer unit against the generic unit it replaces (Fmt/equiv.py, every core)"
+	@echo "  SIM ?= verilator (or vcs): the simulator of every point; under vcs the Verilator-only points are listed as N/A (README: Running with VCS)"
 	@echo "  FMT ?= fp32 (fp32, bf16 or int8) picks the define, +define+FMT_<F>; make regression runs every format's points whatever FMT is"
 	@echo "  Each unit's own Makefile has its benches: make -C Adders/Int check, ..."
 
 # One point: runs in a private copy of the tree, writes $(REG_DIR)/<point>.log and .json.
 regression/%:
-	@$(PYTHON) regression.py --action point --name $* --results $(REG_DIR)$(if $(REG_RUN), --run $(REG_RUN))$(if $(filter regression,$(MAKECMDGOALS)), --keep-going)
+	@$(PYTHON) regression.py --action point --name $* --results $(REG_DIR) --sim $(SIM)$(if $(REG_RUN), --run $(REG_RUN))$(if $(filter regression,$(MAKECMDGOALS)), --keep-going)
 
 regression: $(addprefix regression/,$(REG_POINTS))
 	@$(REG_SUMMARY) --run $(REG_RUN)

@@ -8,6 +8,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "Common", "models"))
+import fourstate  # noqa: E402
 import ipu  # noqa: E402
 import truth  # noqa: E402
 
@@ -25,7 +26,12 @@ def main() -> None:
         print(f"[FAIL] {got.size} results for {n_want} beats")
         print("RESULT: FAILED")
         sys.exit(1)
-    y = np.array([int(x, 16) for x in got], dtype=np.int64)
+    try:  # a 4-state simulator's x or z in a word fails the test, named, rather than crashing int()
+        y = np.array(fourstate.words(got, os.path.basename(a.dump)), dtype=np.int64)
+    except fourstate.Unknown as e:
+        print(fourstate.fail_line(e))
+        print("RESULT: FAILED")
+        sys.exit(1)
     q = np.arange(65536)
     q1, q2 = truth.int8_codes(q >> 8), truth.int8_codes(q & 0xFF)
     rs, same, ok = [], 0, True
