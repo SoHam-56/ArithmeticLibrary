@@ -38,9 +38,11 @@ Everything above runs on any Linux machine; nothing depends on the authors' serv
 
 ```bash
 git clone https://github.com/SoHam-56/ArithmeticLibrary.git && cd ArithmeticLibrary
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-make -j8 regression PYTHON=$PWD/.venv/bin/python
+python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt   # every make below runs in this shell
+make -j8 regression
 ```
+
+Activate the venv in the shell that runs make: some checks call `python3` directly, and without the venv that is the system's Python, which may lack NumPy.
 
 **Choosing N in `make -jN`:** each point is one small bench; the largest process of the whole regression peaked at 0.46 GB (measured, `make -j8` on an 8-core, 64 GB machine, 3 minutes 19 seconds), so N = your core count fits in a few GB. Nothing is skipped.
 
