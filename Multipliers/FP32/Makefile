@@ -52,17 +52,9 @@ VERILATOR_FLAGS = \
     -LDFLAGS "$(SOFTFLOAT_LIB)"
 
 
-VCS_FLAGS = \
-    -full64 \
-    -sverilog \
-    -debug_all \
-    -timescale=1ns/1ps \
-    -Mdir=$(VCS_DIR) \
-    +v2k \
-    +incdir+$(SRC_DIR) \
-    +incdir+$(TB_DIR) \
-    +define+VCS \
-    -CFLAGS "-I$(SOFTFLOAT_INC)"
+# VCS: sim.mk's plain build (4-state, no debug access, no waveform unless TRACE=1), the sources' include paths and SoftFloat's headers
+include $(PRJ_DIR)/../../Common/sim.mk
+VCS_FLAGS = +incdir+$(SRC_DIR) +incdir+$(TB_DIR) -CFLAGS "-I$(SOFTFLOAT_INC)"
 
 default: help
 
@@ -106,15 +98,9 @@ verilator: $(SOFTFLOAT_LIB) check-files
 
 vcs: $(SOFTFLOAT_LIB) check-files
 	@echo "=== VCS simulation for $(TOP_MODULE) ==="
-	@mkdir -p $(VCS_DIR)
-	$(VCS) $(VCS_FLAGS) \
-		-o $(VCS_DIR)/$(TOP_MODULE)_sim \
-		$(DESIGN_FILES) \
-		$(TB_DIR)/$(TESTBENCH) \
-		$(CPP_FILES) \
-		$(SOFTFLOAT_LIB)
+	$(call vcs_build,$(TOP_MODULE),$(VCS_DIR),$(DESIGN_FILES) $(TB_DIR)/$(TESTBENCH) $(CPP_FILES) $(SOFTFLOAT_LIB),$(VCS_FLAGS))
 	@echo "-- Running VCS simulation"
-	cd $(VCS_DIR) && ./$(TOP_MODULE)_sim
+	cd $(VCS_DIR) && ./sim $(VCS_RUN)
 	@echo "=== VCS simulation complete ==="
 
 wave:

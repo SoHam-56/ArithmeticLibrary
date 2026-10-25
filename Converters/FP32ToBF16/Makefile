@@ -9,22 +9,31 @@ RANDOM ?= 1000000
 $(shell mkdir -p $(PRJ_DIR)/Verilator)  # Verilator makes --Mdir but not its parent
 DESIGN  = $(UNIT_SRC)
 FLAGS   = --binary --timing --assert --sv -I$(TB_DIR) --Wno-WIDTHTRUNC --Wno-WIDTHEXPAND --Wno-WIDTHCONCAT --Wno-INITIALDLY -j $(shell nproc) --build-jobs 0 $(EXTRA_FLAGS)
-V       = $(PRJ_DIR)/Verilator
+include $(COMMON)/sim.mk
+V       = $(call sim_dir,$(PRJ_DIR))
 UNIT_SRC ?= $(PRJ_DIR)/src/fp32ToBf16.sv  # the mutant target points it at a faulted copy
 BENCH_DIR ?= $(V)/ref
 
 check:
+ifeq ($(SIM),vcs)
+	$(call vcs_build,TB_fp32ToBf16,$(BENCH_DIR),$(DESIGN) $(TB_DIR)/TB_fp32ToBf16.sv,-pvalue+TB_fp32ToBf16.RANDOM=$(RANDOM) +incdir+$(TB_DIR))
+else
 	verilator $(FLAGS) -GRANDOM=$(RANDOM) --top-module TB_fp32ToBf16 --Mdir $(BENCH_DIR) $(DESIGN) $(TB_DIR)/TB_fp32ToBf16.sv -o sim
-	cd $(BENCH_DIR) && ./sim +DUMP=narrow_bf16.txt | tee run.log
+endif
+	cd $(BENCH_DIR) && ./sim +DUMP=narrow_bf16.txt $(SIM_RUN) | tee run.log
 	command grep -q "^RESULT: PASSED" $(BENCH_DIR)/run.log
 	python3 $(COMMON)/models/check_fpu.py $(BENCH_DIR)/narrow_bf16.txt --unit narrow --format bf16
 
 # the planted fault of testbenches/mutant.sed against this bench: passes only when the bench fails
 UNIT_MAKE = $(MAKE)  # a recipe line naming $(MAKE) would run under make -n
 mutant:
-	@bash $(COMMON)/unit_mutant.sh ties_round_down $(PRJ_DIR)/src/fp32ToBf16.sv $(TB_DIR)/mutant.sed $(UNIT_MAKE) -s --no-print-directory check
+	@bash $(COMMON)/unit_mutant.sh ties_round_down $(PRJ_DIR)/src/fp32ToBf16.sv $(TB_DIR)/mutant.sed $(UNIT_MAKE) -s --no-print-directory check SIM=$(SIM)
 
 lint:
+ifeq ($(SIM),vcs)
+	$(call vcs_lint,fp32ToBf16,fp32ToBf16,$(DESIGN),+define+SYNTHESIS)
+else
 	bash $(COMMON)/lint.sh "lint fp32ToBf16" -Wall -Wno-fatal -DSYNTHESIS --top-module fp32ToBf16 $(DESIGN)
+endif
 
 .PHONY: mutant check lint

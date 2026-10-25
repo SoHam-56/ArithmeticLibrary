@@ -8,7 +8,8 @@ TB_DIR  = $(PRJ_DIR)/testbenches
 PLUSARGS ?=
 $(shell mkdir -p $(PRJ_DIR)/Verilator)  # Verilator makes --Mdir but not its parent
 UNIT_SRC ?= $(PRJ_DIR)/src/int32Adder.sv  # the mutant target points it at a faulted copy
-BENCH_DIR ?= $(PRJ_DIR)/Verilator/ref
+include $(COMMON)/sim.mk
+BENCH_DIR ?= $(PRJ_DIR)/$(if $(filter vcs,$(SIM)),VCS,Verilator)/ref
 DESIGN  = $(UNIT_SRC)
 FLAGS   = --binary --timing --assert --sv +define+FMT_INT8 -I$(COMMON)/testbenches -I$(TB_DIR) \
           --Wno-WIDTHTRUNC --Wno-WIDTHEXPAND --Wno-WIDTHCONCAT --Wno-INITIALDLY -j $(shell nproc) --build-jobs 0 $(EXTRA_FLAGS)
@@ -18,12 +19,21 @@ verilator:
 	  $(TB_DIR)/TB_int32Adder.sv $(COMMON)/testbenches/int_ref.cpp -CFLAGS "-I$(COMMON)/testbenches" -o sim
 	cd $(BENCH_DIR) && ./sim $(PLUSARGS)
 
+# the same bench on VCS (make vcs, or SIM=vcs through make regression): the DPI reference compiled in
+vcs:
+	$(call vcs_build,TB_int32Adder,$(BENCH_DIR),$(COMMON)/src/sienna_fmt_pkg.sv $(DESIGN) $(TB_DIR)/TB_int32Adder.sv $(COMMON)/testbenches/int_ref.cpp,+define+FMT_INT8 +incdir+$(COMMON)/testbenches +incdir+$(TB_DIR) -CFLAGS "-I$(COMMON)/testbenches")
+	cd $(BENCH_DIR) && ./sim $(VCS_RUN) $(PLUSARGS)
+
 # the planted fault of testbenches/mutant.sed against this bench: passes only when the bench fails
 UNIT_MAKE = $(MAKE)  # a recipe line naming $(MAKE) would run under make -n
 mutant:
-	@bash $(COMMON)/unit_mutant.sh carry_cut_at_16 $(PRJ_DIR)/src/int32Adder.sv $(TB_DIR)/mutant.sed $(UNIT_MAKE) -s --no-print-directory verilator
+	@bash $(COMMON)/unit_mutant.sh carry_cut_at_16 $(PRJ_DIR)/src/int32Adder.sv $(TB_DIR)/mutant.sed $(UNIT_MAKE) -s --no-print-directory $(if $(filter vcs,$(SIM)),vcs,verilator) SIM=$(SIM)
 
 lint:
+ifeq ($(SIM),vcs)
+	$(call vcs_lint,int32Adder,int32Adder,$(DESIGN),+define+SYNTHESIS +define+FMT_INT8)
+else
 	bash $(COMMON)/lint.sh "lint int32Adder" -Wall -Wno-fatal -DSYNTHESIS --top-module int32Adder $(DESIGN)
+endif
 
-.PHONY: mutant verilator lint
+.PHONY: mutant verilator vcs lint
