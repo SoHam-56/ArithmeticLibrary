@@ -71,11 +71,11 @@ module credit_tb_consumer #(parameter int SLOTS = 32, parameter int SEED = 7, pa
         mem[wp] <= lnk.data; wp <= wp + 1'b1;
       end
       if (byp) begin
-        if (lnk.data != got_o) err_o <= 1'b1;  // out of order or corrupted
+        if (lnk.data !== got_o) err_o <= 1'b1;  // out of order or corrupted
         got_o <= got_o + 1;
       end
       if (pop) begin
-        if (mem[rp] != got_o) err_o <= 1'b1;  // out of order or corrupted
+        if (mem[rp] !== got_o) err_o <= 1'b1;  // out of order or corrupted
         got_o <= got_o + 1; rp <= rp + 1'b1;
         if (keep) leaked <= 1'b1;
       end
@@ -148,7 +148,7 @@ module TB_credit_link;
   endtask
   task automatic expect_count(input string what, input int want);
     cycles(STAGES + 4);
-    if (int'(bcount) != want) begin
+    if ($isunknown(bcount) || int'(bcount) != want) begin
       burst_bad++;
       $display("[FAIL] burst link %s: count %0d, want %0d", what, bcount, want);
     end
