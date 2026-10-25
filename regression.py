@@ -23,16 +23,16 @@ POINTS = [  # (unit, target, need, bad, firing scan)
     ("Common", "fpu", TB, TB_BAD, True), ("Common", "truth", TB + (r"^truth selftest: \d+ checks, 0 failures$",), TB_BAD, True),
     ("Common", "credit", (r"^credit lint: 0 warnings, 0 errors$",), (r"credit FAIL",), False),  # and CREDIT_OK 'credit OK' lines; the fault modes' lines quote the assertions they fire
     ("Adders/FP32", "verilator", (r"^SUCCESS: All \d+ vectors passed",), TB_BAD, True),
-    ("Adders/Int", "verilator", TB, TB_BAD, True), ("Adders/Int", "check", TB, TB_BAD, True), ("Adders/Int", "vivado_tb", TB, TB_BAD, True),
+    ("Adders/Int", "verilator", TB, TB_BAD, True), ("Adders/Int", "check", TB, TB_BAD, True),
     ("Adders/Int", "lint", (), LINT_BAD, True),
     ("Multipliers/FP32", "verilator", (r"^SUCCESS: All \d+ vectors passed",), TB_BAD, True),
     ("Multipliers/Karatsuba", "verilator", (r"^PASS: Unsigned\(\d+\) and Signed\(\d+\) vectors passed",), (r"^FAIL:",), True),
     ("Multipliers/Int", "verilator", TB, TB_BAD, True), ("Multipliers/Int", "check", TB, TB_BAD, True),
     ("Multipliers/Int", "verilator16", TB, TB_BAD, True), ("Multipliers/Int", "check16", TB, TB_BAD, True),
-    ("Multipliers/Int", "vivado_tb", TB, TB_BAD, True), ("Multipliers/Int", "lint", (), LINT_BAD, True),
-    ("Requantizer", "verilator", TB, TB_BAD, True), ("Requantizer", "vivado_tb", TB, TB_BAD, True), ("Requantizer", "lint", (), LINT_BAD, True),
+    ("Multipliers/Int", "lint", (), LINT_BAD, True),
+    ("Requantizer", "verilator", TB, TB_BAD, True), ("Requantizer", "lint", (), LINT_BAD, True),
     ("Requantizer", "shift_bad", (r"^FIRED$",), (r"^NOT-FIRED$",), False),  # its log shows the assertion's %Error
-    ("QuantizedAdder", "verilator", TB, TB_BAD, True), ("QuantizedAdder", "vivado_tb", TB, TB_BAD, True),
+    ("QuantizedAdder", "verilator", TB, TB_BAD, True),
     ("QuantizedAdder", "lint", (), LINT_BAD, True), ("QuantizedAdder", "shift_bad", (r"^FIRED$",), (r"^NOT-FIRED$",), False),
     ("Common", "pkg_fp32", TB, TB_BAD, True), ("Common", "pkg_bf16", TB, TB_BAD, True), ("Common", "pkg_int8", TB, TB_BAD, True),  # the define map
 ]

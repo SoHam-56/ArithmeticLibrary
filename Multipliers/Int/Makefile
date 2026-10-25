@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-# intMultiplier: verilator (C reference through DPI, every int8 pair), check (against ipu.py), verilator16 / check16 (W = 16), vivado_tb, vectors, lint.
+# intMultiplier: verilator (C reference through DPI, every int8 pair), check (against ipu.py), verilator16 / check16 (W = 16), lint.
 PRJ_DIR = $(shell pwd)
 ARIL    = $(PRJ_DIR)/../..
 COMMON  = $(ARIL)/Common
@@ -33,16 +33,8 @@ check16: build16
 	cd $(PRJ_DIR)/Verilator/ref16 && ./sim +DUMP=mul_int16.txt $(PLUSARGS)
 	python3 $(COMMON)/models/check_ipu.py $(PRJ_DIR)/Verilator/ref16/mul_int16.txt --unit mul16
 
-vivado_tb:
-	verilator $(FLAGS) --top-module TB_intMultiplierVIVADO --Mdir $(PRJ_DIR)/Verilator/viv $(DESIGN) \
-	  $(TB_DIR)/TB_intMultiplierVIVADO.sv -o sim
-	cd $(TB_DIR) && $(PRJ_DIR)/Verilator/viv/sim
-
-vectors:
-	$(COMMON)/testbenches/generate_int_vectors.sh
-
 lint:
 	bash $(COMMON)/lint.sh "lint intMultiplier W=8" -Wall -Wno-fatal -DSYNTHESIS --top-module intMultiplier -GW=8 $(RTL)
 	bash $(COMMON)/lint.sh "lint intMultiplier W=16" -Wall -Wno-fatal -DSYNTHESIS --top-module intMultiplier -GW=16 $(RTL)
 
-.PHONY: build verilator check build16 verilator16 check16 vivado_tb vectors lint
+.PHONY: build verilator check build16 verilator16 check16 lint

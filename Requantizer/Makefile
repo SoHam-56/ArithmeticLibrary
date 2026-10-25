@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-# int8Requantizer: verilator (C reference through DPI on every row, then the true function on each row's real scale), vivado_tb (committed vectors.mem, no DPI), vectors, shift_bad (a_shift_range fires), lint.
+# int8Requantizer: verilator (C reference through DPI on every row, then the true function on each row's real scale), shift_bad (a_shift_range fires), lint.
 PRJ_DIR  = $(shell pwd)
 ARIL     = $(PRJ_DIR)/..
 COMMON   = $(ARIL)/Common
@@ -24,14 +24,6 @@ verilator:
 	$(call SIM,$(V)/ref/sim +VEC=$(V)/vec.txt +DUMP=$(V)/dump.txt $(PLUSARGS),$(V)/sim_vec.log)
 	$(CHECK) $(V)/dump.txt --vectors $(V)/vec.txt
 
-vivado_tb:
-	verilator $(FLAGS) +define+VIVADO --top-module TB_int8Requantizer --Mdir $(V)/viv $(DESIGN) $(TB_DIR)/TB_int8Requantizer.sv -o sim
-	$(call SIM,cd $(TB_DIR) && $(V)/viv/sim $(PLUSARGS),$(V)/sim_viv.log)
-
-vectors:
-	$(GEN) $(TB_DIR)/vectors.mem --random 10000 --scales 100 --per 16 --expected
-	rm -f $(TB_DIR)/vectors.mem.npz
-
 # One row with shift MAX_SHIFT + 1: a_shift_range must fire, and only it.
 shift_bad:
 	@printf '00000064 800000 38 00 80 7f\n' > $(V)/vec_bad.txt
@@ -44,4 +36,4 @@ lint:
 	bash $(COMMON)/lint.sh "lint int8Requantizer" -Wall -Wno-fatal -DSYNTHESIS --top-module int8Requantizer $(PRJ_DIR)/src/int8Requantizer.sv
 	bash $(COMMON)/lint.sh "lint int8Requantizer (assertions)" -Wall -Wno-fatal --top-module int8Requantizer $(PRJ_DIR)/src/int8Requantizer.sv
 
-.PHONY: verilator vivado_tb vectors shift_bad lint
+.PHONY: verilator shift_bad lint

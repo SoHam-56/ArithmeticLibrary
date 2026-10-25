@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-# int8QuantizedAdder: verilator (C reference through DPI: every (q1, q2) under the corner sets, then RANDOM rows; then the true function on the real ratios), vivado_tb (committed vectors.mem, no DPI), vectors, shift_bad (a_shift_range fires), lint.
+# int8QuantizedAdder: verilator (C reference through DPI: every (q1, q2) under the corner sets, then RANDOM rows; then the true function on the real ratios), shift_bad (a_shift_range fires), lint.
 PRJ_DIR  = $(shell pwd)
 ARIL     = $(PRJ_DIR)/..
 COMMON   = $(ARIL)/Common
@@ -24,13 +24,6 @@ verilator:
 	$(call SIM,$(V)/ref/sim +CONSTS=$(V)/vec.txt.consts +VEC=$(V)/vec.txt +DUMP=$(V)/dump.txt $(PLUSARGS),$(V)/sim_vec.log)
 	$(CHECK) $(V)/dump.txt --vectors $(V)/vec.txt
 
-vivado_tb:
-	verilator $(FLAGS) +define+VIVADO --top-module TB_int8QuantizedAdder --Mdir $(V)/viv $(DESIGN) $(TB_DIR)/TB_int8QuantizedAdder.sv -o sim
-	$(call SIM,cd $(TB_DIR) && $(V)/viv/sim $(PLUSARGS),$(V)/sim_viv.log)
-
-vectors:
-	$(GEN) $(TB_DIR)/vectors.mem --random 10000 --expected
-
 # One row with shift MAX_SHIFT + 1: a_shift_range must fire.
 shift_bad:
 	@printf '0a 0a 00 00 80000000 80000000 2a 00 80 7f\n' > $(V)/vec_bad.txt
@@ -43,4 +36,4 @@ lint:
 	bash $(COMMON)/lint.sh "lint int8QuantizedAdder" -Wall -Wno-fatal -DSYNTHESIS --top-module int8QuantizedAdder $(PRJ_DIR)/src/int8QuantizedAdder.sv
 	bash $(COMMON)/lint.sh "lint int8QuantizedAdder (assertions)" -Wall -Wno-fatal --top-module int8QuantizedAdder $(PRJ_DIR)/src/int8QuantizedAdder.sv
 
-.PHONY: verilator vivado_tb vectors shift_bad lint
+.PHONY: verilator shift_bad lint

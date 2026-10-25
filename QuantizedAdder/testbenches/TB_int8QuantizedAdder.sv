@@ -1,11 +1,9 @@
 `timescale 1ns / 100ps
 
-// int8QuantizedAdder against the C reference through DPI: every (q1, q2) under each +CONSTS set, then every +VEC row; latency QUANT_ADD_LATENCY (build at +define+FMT_INT8), a bubble every 64 beats; +DUMP writes each result; VIVADO reads vectors.mem's expected words instead.
+// int8QuantizedAdder against the C reference through DPI: every (q1, q2) under each +CONSTS set, then every +VEC row; latency QUANT_ADD_LATENCY (build at +define+FMT_INT8), a bubble every 64 beats; +DUMP writes each result.
 module TB_int8QuantizedAdder;
-`ifndef VIVADO
   import "DPI-C" function int c_int8_quantized_add(input int q1, input int q2, input int z1, input int z2, input int m1, input int m2,
                                                    input int e, input int zo, input int lo, input int hi);
-`endif
   localparam int LAT = sienna_fmt_pkg::QUANT_ADD_LATENCY;
   initial if (LAT == 0) $fatal(1, "TB_int8QuantizedAdder: QUANT_ADD_LATENCY is 0: build at +define+FMT_INT8");
   logic clk = 0, rstn = 0;
@@ -33,7 +31,6 @@ module TB_int8QuantizedAdder;
 
   // The C reference on values worked by hand, before it judges the unit.
   task automatic known_values();
-`ifndef VIVADO
     if (c_int8_quantized_add(10, 10, 0, 0, 1 << 31, 1 << 31, 33, 0, -128, 127) != 5 ||  // (10 + 10) / 4
         c_int8_quantized_add(-3, -3, 0, 0, 1 << 31, 1 << 31, 33, 0, -128, 127) != -1 ||  // -1.5 rounds half up
         c_int8_quantized_add(50, 10, 40, 0, 1 << 31, 1 << 31, 33, 4, -128, 127) != 9 ||  // zero points
@@ -41,7 +38,6 @@ module TB_int8QuantizedAdder;
         c_int8_quantized_add(127, 127, -128, -128, -1, -1, 9, 0, -128, 127) != 127 ||  // the widest sum saturates
         c_int8_quantized_add(-128, -128, 127, 127, -1, -1, 9, 0, -128, 127) != -128)
       $fatal(1, "TB_int8QuantizedAdder: the C reference fails a known value");
-`endif
   endtask
 
   always @(posedge clk) begin
@@ -69,10 +65,8 @@ module TB_int8QuantizedAdder;
   end
 
   task automatic beat(input tx_t t);
-`ifndef VIVADO
     t.want = 8'(c_int8_quantized_add(int'($signed(t.q1)), int'($signed(t.q2)), int'($signed(t.z1)), int'($signed(t.z2)), int'(t.m1),
                                      int'(t.m2), int'(t.e), int'($signed(t.zo)), int'($signed(t.lo)), int'($signed(t.hi))));
-`endif
     q.push_back(t);
     #1 valid = 1;
     {q1, q2, zp1, zp2, m1, m2, shift, zpo, amin, amax} = {t.q1, t.q2, t.z1, t.z2, t.m1, t.m2, t.e, t.zo, t.lo, t.hi};
@@ -96,7 +90,6 @@ module TB_int8QuantizedAdder;
     repeat (4) @(posedge clk);
     #1 rstn = 1;
     repeat (2) @(posedge clk);
-`ifndef VIVADO
     if ($value$plusargs("CONSTS=%s", consts)) begin
       fd = $fopen(consts, "r");
       if (fd == 0) $fatal(1, "TB_int8QuantizedAdder: cannot open %s", consts);
@@ -110,20 +103,12 @@ module TB_int8QuantizedAdder;
       $fclose(fd);
     end
     if (!$value$plusargs("VEC=%s", vec)) vec = "";
-`else
-    vec = "vectors.mem";
-`endif
     if (vec != "") begin
       fd = $fopen(vec, "r");
       if (fd == 0) $fatal(1, "TB_int8QuantizedAdder: cannot open %s", vec);
       forever begin
-`ifdef VIVADO
-        nf = $fscanf(fd, "%h %h %h %h %h %h %h %h %h %h %h\n", t.q1, t.q2, t.z1, t.z2, t.m1, t.m2, t.e, t.zo, t.lo, t.hi, t.want);
-        if (nf != 11) break;
-`else
         nf = $fscanf(fd, "%h %h %h %h %h %h %h %h %h %h\n", t.q1, t.q2, t.z1, t.z2, t.m1, t.m2, t.e, t.zo, t.lo, t.hi);
         if (nf != 10) break;
-`endif
         beat(t);
       end
       $fclose(fd);
@@ -144,11 +129,7 @@ module TB_int8QuantizedAdder;
       $display("[FAIL] latency %0d, sienna_fmt_pkg::QUANT_ADD_LATENCY says %0d", lat, LAT);
     end
     $display("int8QuantizedAdder: %0d beats against the %s, %0d errors, latency %0d", checked,
-`ifdef VIVADO
-             "file's expected words",
-`else
              "C reference",
-`endif
              errs, lat);
     $display("RESULT: %s", errs == 0 ? "PASSED" : "FAILED");
     $finish;

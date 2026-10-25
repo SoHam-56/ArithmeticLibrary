@@ -16,7 +16,7 @@ INTERNAL = re.compile(r"^.*(?:%Error: Internal Error|%Error: Verilator internal 
 MAKE_VARS = ("MAKEFLAGS", "MAKELEVEL", "MFLAGS", "MAKEOVERRIDES", "SMALL", "FMT", "REG_DIR", "REG_RUN", "EXTRA_FLAGS", "SIM_ARGS",
              "PLUSARGS", "TRACE", "OPT_FAST", "SIM_THREADS")  # a point checks the design as checked in, not the caller's variables
 COPY_SKIP_DIRS = (".git", "results", "__pycache__", "VCS")  # a tree without git: generated outputs a copy leaves out
-COPY_SKIP_PREFIX = ("Verilator", "VIVADO")
+COPY_SKIP_PREFIX = ("Verilator",)
 SIZES, SIZES_SMALL = (8, 16, 32, 64), (8, 16)  # SMALL=1: what a 16 GB machine can build
 
 

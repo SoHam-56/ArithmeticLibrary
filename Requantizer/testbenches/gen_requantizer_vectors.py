@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Writes int8Requantizer vectors: hex rows (acc mult shift zp act_min act_max [expected]) and an .npz with each row's real scale S.
+"""Writes int8Requantizer vectors: hex rows (acc mult shift zp act_min act_max) and an .npz with each row's real scale S.
 
 Rows: word corners, requant_sat's saturation corners, dense real scales 1e-12..2^31 with accumulators aimed at |acc S| <= 400 and at
 output ties, and random raw (mult, shift) words; every row's scale is real, so every row is gated on the true function.
@@ -87,7 +87,6 @@ def main() -> None:
     p.add_argument("--random", type=int, default=1000000, help="random raw-word rows")
     p.add_argument("--scales", type=int, default=2000, help="dense real scales")
     p.add_argument("--per", type=int, default=64, help="aimed accumulators per dense scale")
-    p.add_argument("--expected", action="store_true", help="append ipu.requantize's word to each row (the committed, DPI-free vectors)")
     p.add_argument("--seed", type=int, default=1)
     a = p.parse_args()
     rng = np.random.default_rng(a.seed)
@@ -96,9 +95,9 @@ def main() -> None:
     s = np.concatenate([v[1] for v in parts.values()])
     kind = np.concatenate([np.full(v[1].size, i, dtype=np.int8) for i, v in enumerate(parts.values())])
     want = ipu.requantize(*cols)
-    widths = [32, 24, 6, 8, 8, 8] + ([8] if a.expected else [])
-    table = np.stack([ipu.bits(v, w) for v, w in zip(cols + ([want] if a.expected else []), widths)], axis=1)
-    np.savetxt(a.out, table, fmt=" ".join(["%08x", "%06x", "%02x", "%02x", "%02x", "%02x"] + (["%02x"] if a.expected else [])))
+    widths = [32, 24, 6, 8, 8, 8]
+    table = np.stack([ipu.bits(v, w) for v, w in zip(cols, widths)], axis=1)
+    np.savetxt(a.out, table, fmt=" ".join(["%08x", "%06x", "%02x", "%02x", "%02x", "%02x"]))
     np.savez(a.out + ".npz", acc=cols[0], mult=cols[1], shift=cols[2], zp=cols[3], lo=cols[4], hi=cols[5], scale=s, kind=kind,
              kinds=np.array(list(parts)))
     print(f"{a.out}: {len(table)} rows ({', '.join(f'{len(v[1])} {k}' for k, v in parts.items())}), "

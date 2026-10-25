@@ -59,22 +59,19 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("out", help="the row file; OUT.consts for the sets and OUT.npz for the real ratios")
     p.add_argument("--random", type=int, default=1000000)
-    p.add_argument("--expected", action="store_true", help="append ipu.qadd's word to each row and write no consts (the committed vectors)")
     p.add_argument("--seed", type=int, default=1)
     a = p.parse_args()
     rng = np.random.default_rng(a.seed)
     sets = corner_sets()
     cols, r1, r2, raw = random_rows(rng, a.random)
-    want = ipu.qadd(*cols)
-    widths = [8, 8] + list(WIDTHS) + ([8] if a.expected else [])
-    table = np.stack([ipu.bits(v, w) for v, w in zip(cols + ([want] if a.expected else []), widths)], axis=1)
-    np.savetxt(a.out, table, fmt=" ".join(["%02x", "%02x"] + list(FMT) + (["%02x"] if a.expected else [])))
-    if not a.expected:
-        st = np.array([s[:8] for s in sets], dtype=np.int64)
-        np.savetxt(a.out + ".consts", np.stack([ipu.bits(st[:, i], w) for i, w in enumerate(WIDTHS)], axis=1), fmt=" ".join(FMT))
-        np.savez(a.out + ".npz", sets=st, set_r1=np.array([s[8] for s in sets]), set_r2=np.array([s[9] for s in sets]),
-                 rows=np.stack(cols, axis=1), r1=r1, r2=r2, raw=raw)
-    print(f"{a.out}: {0 if a.expected else len(sets)} exhaustive sets, {len(table)} rows ({int(raw.sum())} raw words)")
+    widths = [8, 8] + list(WIDTHS)
+    table = np.stack([ipu.bits(v, w) for v, w in zip(cols, widths)], axis=1)
+    np.savetxt(a.out, table, fmt=" ".join(["%02x", "%02x"] + list(FMT)))
+    st = np.array([s[:8] for s in sets], dtype=np.int64)
+    np.savetxt(a.out + ".consts", np.stack([ipu.bits(st[:, i], w) for i, w in enumerate(WIDTHS)], axis=1), fmt=" ".join(FMT))
+    np.savez(a.out + ".npz", sets=st, set_r1=np.array([s[8] for s in sets]), set_r2=np.array([s[9] for s in sets]),
+             rows=np.stack(cols, axis=1), r1=r1, r2=r2, raw=raw)
+    print(f"{a.out}: {len(sets)} exhaustive sets, {len(table)} rows ({int(raw.sum())} raw words)")
 
 
 if __name__ == "__main__":

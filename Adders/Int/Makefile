@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-# intAdder: verilator (C reference through DPI: wrap corners, carry chains, random), check (against ipu.py), vivado_tb, vectors, lint.
+# intAdder: verilator (C reference through DPI: wrap corners, carry chains, random), check (against ipu.py), lint.
 PRJ_DIR = $(shell pwd)
 ARIL    = $(PRJ_DIR)/../..
 COMMON  = $(ARIL)/Common
@@ -22,15 +22,7 @@ check: build
 	cd $(PRJ_DIR)/Verilator/ref && ./sim +DUMP=add_int32.txt $(PLUSARGS)
 	python3 $(COMMON)/models/check_ipu.py $(PRJ_DIR)/Verilator/ref/add_int32.txt --unit add
 
-vivado_tb:
-	verilator $(FLAGS) --top-module TB_intAdderVIVADO --Mdir $(PRJ_DIR)/Verilator/viv $(DESIGN) \
-	  $(TB_DIR)/TB_intAdderVIVADO.sv -o sim
-	cd $(TB_DIR) && $(PRJ_DIR)/Verilator/viv/sim
-
-vectors:
-	$(COMMON)/testbenches/generate_int_vectors.sh
-
 lint:
 	bash $(COMMON)/lint.sh "lint intAdder" -Wall -Wno-fatal -DSYNTHESIS --top-module intAdder $(RTL)
 
-.PHONY: build verilator check vivado_tb vectors lint
+.PHONY: build verilator check lint
