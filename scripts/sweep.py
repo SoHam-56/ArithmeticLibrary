@@ -15,8 +15,8 @@ import time
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-COMMON = os.path.join(HERE, "..", "Common")
-sys.path.insert(0, os.path.join(COMMON, "models"))
+ROOT = os.path.normpath(os.path.join(HERE, ".."))
+sys.path.insert(0, os.path.join(ROOT, "models"))
 import fmt_pkg  # noqa: E402
 import int8_vectors  # noqa: E402
 import ipu  # noqa: E402
@@ -110,7 +110,7 @@ def provenance():
 
 
 def build(fmt, kind, data_width, ext_data_width, log, rule=None):
-    args = ["make", "-s", "--no-print-directory", "-C", HERE, "sweep-build", f"FMT={fmt}", f"KIND={kind}"] + \
+    args = ["make", "-s", "--no-print-directory", "-C", ROOT, "fmt-sweep-build", f"FMT={fmt}", f"KIND={kind}"] + \
         ([f"DATA_WIDTH={data_width}"] if data_width else []) + ([f"EXT_DATA_WIDTH={ext_data_width}"] if ext_data_width else []) + \
         ([f"RULE={rule}"] if rule else [])
     r = subprocess.run(args, capture_output=True, text=True)
@@ -189,7 +189,7 @@ def main():
     ap.add_argument("--jobs", type=int, default=len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count())
     ap.add_argument("--scale", type=float, default=1.0, help="multiply every random count (a probe uses < 1); exhaustive modes stay whole")
     ap.add_argument("--slices", type=int, default=0, help="run only the first k slices of each kind (a probe)")
-    ap.add_argument("--out", default=os.path.join(HERE, "results", "sweep"))
+    ap.add_argument("--out", default=os.path.join(ROOT, "results", "sweep"))
     ap.add_argument("--selftest", action="store_true", help="gate_verdict on hand cases (no simulator)")
     ap.add_argument("--write-params", nargs=2, metavar=("KIND", "FILE"), help="write one kind's parameter sets and stop")
     if "--selftest" in sys.argv[1:]:

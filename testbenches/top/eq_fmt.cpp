@@ -2,7 +2,7 @@
 // Modes: pairs16 --lo B (a's high byte B, every b: 2^24), pairs8 (every 8-bit pair), unary32 --lo B (every word with high byte B),
 // dense2 (floats: every exponent pair x signs x 8 mantissa pairs), corners (integers: every pair of the signed corners),
 // random --n N --seed S. Every mode has valid gaps (random: 1 in 8; the others: every 13th cycle), and every vector is still driven.
-// Built per top by Fmt/Makefile with -DVTOP=V<top> -DEQ_BITS=<operand bits> [-DCOMB].
+// Built per top by the Makefile (fmt-eq-build) with -DVTOP=V<top> -DEQ_BITS=<operand bits> [-DCOMB].
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>

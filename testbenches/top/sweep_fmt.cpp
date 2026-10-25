@@ -1,6 +1,6 @@
 // Unit sweep of one Fmt wrapper under one define: streams vectors one per cycle, judges every output against the float64 true
 // function with truefn.py's rules (written again here in C), and writes a sample of rows for truefn.py --recheck.
-// Built per kind by Fmt/Makefile: -DKIND_<KIND>, fmt_pkg.py --cflags (FMT_<F>, PKG_* widths and latency), the wrapper or test top as top;
+// Built per kind by the Makefile (fmt-sweep-build): -DKIND_<KIND>, fmt_pkg.py --cflags (FMT_<F>, PKG_* widths and latency), the wrapper or test top as top;
 // requantize and quantized_add read their parameter sets (real scales and the encoders' words) from --params, written by sweep.py.
 #include <cfloat>
 #include <cinttypes>
@@ -21,7 +21,7 @@
 typedef __int128 i128;
 
 // ── the format ──
-// Every macro the harness reads comes from the build (fmt_pkg.py --cflags and Fmt/Makefile): none has a default here.
+// Every macro the harness reads comes from the build (fmt_pkg.py --cflags and the Makefile): none has a default here.
 #if defined(FMT_FP32) + defined(FMT_BF16) + defined(FMT_INT8) != 1
 #error "exactly one of FMT_FP32, FMT_BF16, FMT_INT8 must be defined"
 #endif

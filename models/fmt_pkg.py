@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The one parser of sienna_fmt_pkg: its precision constants and bundles under a define, read from the RTL text.
 
-The package is Common/src/sienna_fmt_pkg.sv, its define map after the old functions. Values come from the text, never from a copy here.
+The package is src/fmt/sienna_fmt_pkg.sv, its define map after the old functions. Values come from the text, never from a copy here.
 """
 import argparse
 import json
@@ -10,7 +10,7 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SRC = os.path.normpath(os.path.join(HERE, "..", "src"))
+SRC = os.path.normpath(os.path.join(HERE, "..", "src", "fmt"))
 PKG = os.path.join(SRC, "sienna_fmt_pkg.sv")
 FORMATS = ("fp32", "bf16", "int8")
 DEFINES = {f: "FMT_" + f.upper() for f in FORMATS}

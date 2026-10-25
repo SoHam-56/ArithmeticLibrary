@@ -11,6 +11,7 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.normpath(os.path.join(HERE, ".."))
 PAIRS16_SLICES = [("pairs16", {"lo": hb}) for hb in range(256)]  # every 16-bit pair: 2^32
 RANDOM_SLICES = lambda n, k=8: [("random", {"n": n // k, "seed": 500 + i}) for i in range(k)]
 PLAN = {  # top: (operand bits, combinational, slices, what it proves)
@@ -34,7 +35,7 @@ def provenance():
 
 
 def build(top, bits, comb, log):
-    r = subprocess.run(["make", "-s", "--no-print-directory", "-C", HERE, "eq-build", f"TOP={top}", f"BITS={bits}"] + (["COMB=1"] if comb else []),
+    r = subprocess.run(["make", "-s", "--no-print-directory", "-C", ROOT, "fmt-eq-build", f"TOP={top}", f"BITS={bits}"] + (["COMB=1"] if comb else []),
                        capture_output=True, text=True)
     log.write(r.stdout + r.stderr)
     built = [x.split()[-1] for x in r.stdout.splitlines() if x.startswith(f"eq-build {top}: /")]
@@ -55,7 +56,7 @@ def main():
     ap.add_argument("--jobs", type=int, default=len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count())
     ap.add_argument("--scale", type=float, default=1.0, help="multiply every random count (a quick run uses < 1)")
     ap.add_argument("--slices", type=int, default=0, help="run only the first k slices of each pair (a quick run)")
-    ap.add_argument("--out", default=os.path.join(HERE, "results", "equiv"))
+    ap.add_argument("--out", default=os.path.join(ROOT, "results", "equiv"))
     a = ap.parse_args()
     unknown = [t for t in a.tops.split(",") if t and t not in PLAN]
     if unknown:

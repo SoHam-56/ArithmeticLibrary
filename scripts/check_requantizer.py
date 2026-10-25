@@ -7,7 +7,7 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "Common", "models"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "models"))
 import fourstate  # noqa: E402
 import ipu  # noqa: E402
 import truth  # noqa: E402

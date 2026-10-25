@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Fmt's lint gate: new code (the wrappers, the package's define map, the per-format units, Fmt's test tops) has no warning; the existing units
-and the old package functions may keep only the warnings recorded in testbenches/lint_baseline.txt for that point (no new warning).
+and the old package functions may keep only the warnings recorded in testbenches/top/lint_baseline.txt for that point (no new warning).
 Every %Warning line counts: one without a file:line:col location fails. Args: LOG POINT TOP; --record writes the point's existing-file
 warnings to the baseline instead of checking them (refused when an existing file changed since the last record, unless --force); --as DIR
 reads paths under DIR as if DIR were the ArithmeticLibrary root (a control's copied tree)."""
@@ -12,10 +12,10 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
-BASELINE = os.path.join(HERE, "testbenches", "lint_baseline.txt")  # --baseline and --root override these (the controls' copies)
-NEW = ("Fmt/", "Multipliers/BF16/", "Adders/BF16/", "Multipliers/BF16Wide/", "Converters/FP32ToBF16/",
-       "Multipliers/Int8/", "Multipliers/Int16/", "Multipliers/Int24/", "Adders/Int32/")  # the restructure's new files: no warning at all
-PKG = "Common/src/sienna_fmt_pkg.sv"
+BASELINE = os.path.join(ROOT, "testbenches", "top", "lint_baseline.txt")  # --baseline and --root override these (the controls' copies)
+NEW = ("src/fmt/fmt_", "src/multipliers/bf16Multiplier.sv", "src/adders/bf16Adder.sv", "src/multipliers/bf16WideMultiplier.sv", "src/converters/",
+       "src/multipliers/int8Multiplier.sv", "src/multipliers/int16Multiplier.sv", "src/multipliers/int24Multiplier.sv", "src/adders/int32Adder.sv")  # the restructure's new files: no warning at all
+PKG = "src/fmt/sienna_fmt_pkg.sv"
 MAP_MARK = "// ── define map"  # the package's lines from this comment on are new code; the old functions above it are existing code
 
 
@@ -90,7 +90,7 @@ def main():
     ap.add_argument("--record", action="store_true")
     ap.add_argument("--force", action="store_true", help="re-record although an existing file changed")
     ap.add_argument("--as", dest="alias", help="read paths under this directory as if it were the root")
-    ap.add_argument("--baseline", help="the baseline file (default testbenches/lint_baseline.txt)")
+    ap.add_argument("--baseline", help="the baseline file (default testbenches/top/lint_baseline.txt)")
     ap.add_argument("--root", help="the tree whose existing files the recorded sha256 values are checked against")
     a = ap.parse_args()
     global BASELINE, ROOT
