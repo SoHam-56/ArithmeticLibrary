@@ -1,11 +1,12 @@
 # The simulator of every build that includes this: SIM ?= verilator (default) or vcs, any other value stops make; include it with an absolute path.
 SIM ?= verilator
 SIMS = verilator vcs
-# a goal named vcs (vcs, vcs16, vcs-lint, ...) is a VCS run whatever SIM the environment holds
-ifneq ($(filter vcs vcs%,$(MAKECMDGOALS)),)
+# a goal named vcs (vcs, vcs16, vcs-lint, ArithmeticLibrary's <unit>-vcs, <unit>-vcs16) is a VCS run whatever SIM the environment holds
+VCS_GOALS = $(filter vcs vcs% %-vcs %-vcs16,$(MAKECMDGOALS))
+ifneq ($(VCS_GOALS),)
 ifeq ($(origin SIM),command line)
 ifneq ($(SIM),vcs)
-$(error make $(filter vcs vcs%,$(MAKECMDGOALS)) runs VCS: SIM=$(SIM) contradicts it)
+$(error make $(VCS_GOALS) runs VCS: SIM=$(SIM) contradicts it)
 endif
 endif
 override SIM := vcs
