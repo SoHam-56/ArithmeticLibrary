@@ -12,57 +12,57 @@ import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(ROOT, "Common"))
+sys.path.insert(0, os.path.join(ROOT, "scripts"))
 import regress  # noqa: E402
 
 TB = (r"^RESULT: PASSED",)  # the benches print RESULT and finish with status 0 either way
 TB_BAD = (r"RESULT: FAILED", r"^FAILURE:")
 LINT_BAD = (r"^%Warning-(?:LATCH|MULTIDRIVEN|UNOPTFLAT).*$",)
 POINTS = [  # (unit, target, need, bad, firing scan)
-    ("Common", "dump32", TB, TB_BAD, True), ("Common", "ipu", TB, TB_BAD, True),
-    ("Common", "fpu", TB, TB_BAD, True), ("Common", "truth", TB + (r"^truth selftest: \d+ checks, 0 failures$",), TB_BAD, True),
-    ("Common", "credit", (r"^credit lint: 0 warnings, 0 errors$",), (r"credit FAIL",), False),  # and CREDIT_OK 'credit OK' lines; the fault modes' lines quote the assertions they fire
-    ("Adders/FP32", "verilator", (r"^SUCCESS: All \d+ vectors passed",), TB_BAD, True),
-    ("Adders/Int", "verilator", TB, TB_BAD, True), ("Adders/Int", "check", TB, TB_BAD, True),
-    ("Adders/Int", "lint", (), LINT_BAD, True),
-    ("Multipliers/FP32", "verilator", (r"^SUCCESS: All \d+ vectors passed",), TB_BAD, True),
-    ("Multipliers/Karatsuba", "verilator", (r"^PASS: Unsigned\(\d+\) and Signed\(\d+\) vectors passed",), (r"^FAIL:",), True),
-    ("Multipliers/Int", "verilator", TB, TB_BAD, True), ("Multipliers/Int", "check", TB, TB_BAD, True),
-    ("Multipliers/Int", "verilator16", TB, TB_BAD, True), ("Multipliers/Int", "check16", TB, TB_BAD, True),
-    ("Multipliers/Int", "lint", (), LINT_BAD, True),
-    ("Requantizer", "verilator", TB, TB_BAD, True), ("Requantizer", "lint", (), LINT_BAD, True),
-    ("Requantizer", "shift_bad", (r"^FIRED$",), (r"^NOT-FIRED$",), False),  # its log shows the assertion's %Error
-    ("QuantizedAdder", "verilator", TB, TB_BAD, True),
-    ("QuantizedAdder", "lint", (), LINT_BAD, True), ("QuantizedAdder", "shift_bad", (r"^FIRED$",), (r"^NOT-FIRED$",), False),
-    ("Common", "pkg_fp32", TB, TB_BAD, True), ("Common", "pkg_bf16", TB, TB_BAD, True), ("Common", "pkg_int8", TB, TB_BAD, True),  # the define map
+    ("common", "dump32", TB, TB_BAD, True), ("common", "ipu", TB, TB_BAD, True),
+    ("common", "fpu", TB, TB_BAD, True), ("common", "truth", TB + (r"^truth selftest: \d+ checks, 0 failures$",), TB_BAD, True),
+    ("common", "credit", (r"^credit lint: 0 warnings, 0 errors$",), (r"credit FAIL",), False),  # and CREDIT_OK 'credit OK' lines; the fault modes' lines quote the assertions they fire
+    ("fp32Adder", "verilator", (r"^SUCCESS: All \d+ vectors passed",), TB_BAD, True),
+    ("intAdder", "verilator", TB, TB_BAD, True), ("intAdder", "check", TB, TB_BAD, True),
+    ("intAdder", "lint", (), LINT_BAD, True),
+    ("fp32Multiplier", "verilator", (r"^SUCCESS: All \d+ vectors passed",), TB_BAD, True),
+    ("karatsuba", "verilator", (r"^PASS: Unsigned\(\d+\) and Signed\(\d+\) vectors passed",), (r"^FAIL:",), True),
+    ("intMultiplier", "verilator", TB, TB_BAD, True), ("intMultiplier", "check", TB, TB_BAD, True),
+    ("intMultiplier", "verilator16", TB, TB_BAD, True), ("intMultiplier", "check16", TB, TB_BAD, True),
+    ("intMultiplier", "lint", (), LINT_BAD, True),
+    ("int8Requantizer", "verilator", TB, TB_BAD, True), ("int8Requantizer", "lint", (), LINT_BAD, True),
+    ("int8Requantizer", "shift_bad", (r"^FIRED$",), (r"^NOT-FIRED$",), False),  # its log shows the assertion's %Error
+    ("int8QuantizedAdder", "verilator", TB, TB_BAD, True),
+    ("int8QuantizedAdder", "lint", (), LINT_BAD, True), ("int8QuantizedAdder", "shift_bad", (r"^FIRED$",), (r"^NOT-FIRED$",), False),
+    ("common", "pkg_fp32", TB, TB_BAD, True), ("common", "pkg_bf16", TB, TB_BAD, True), ("common", "pkg_int8", TB, TB_BAD, True),  # the define map
 ]
-NEW_UNITS = (("Multipliers/BF16", "bf16Multiplier", "verilator"), ("Adders/BF16", "bf16Adder", "verilator"),
-             ("Multipliers/BF16Wide", "bf16WideMultiplier", "verilator"), ("Converters/FP32ToBF16", "fp32ToBf16", "check"),
-             ("Multipliers/Int8", "int8Multiplier", "verilator"), ("Multipliers/Int16", "int16Multiplier", "verilator"),
-             ("Multipliers/Int24", "int24Multiplier", "verilator"), ("Adders/Int32", "int32Adder", "verilator"))  # the per-format units
+NEW_UNITS = (("bf16Multiplier", "bf16Multiplier", "verilator"), ("bf16Adder", "bf16Adder", "verilator"),
+             ("bf16WideMultiplier", "bf16WideMultiplier", "verilator"), ("fp32ToBf16", "fp32ToBf16", "check"),
+             ("int8Multiplier", "int8Multiplier", "verilator"), ("int16Multiplier", "int16Multiplier", "verilator"),
+             ("int24Multiplier", "int24Multiplier", "verilator"), ("int32Adder", "int32Adder", "verilator"))  # the per-format units
 POINTS += [(u, t, TB + (rf"^{top}: \d+ .* 0 errors", ), TB_BAD, True) for u, top, t in NEW_UNITS]  # each on its direct reference bench
-POINTS += [(u, "lint", (rf"^lint {top}: 0 warnings, 0 errors$",), LINT_BAD, True) for u, top, _ in NEW_UNITS]  # lint clean; make -C Fmt equiv
+POINTS += [(u, "lint", (rf"^lint {top}: 0 warnings, 0 errors$",), LINT_BAD, True) for u, top, _ in NEW_UNITS]  # lint clean; make fmt-equiv
 MUTANT_OK = (r"^mutant \S+ caught by its bench: ",)
 MUTANT_BAD = (r"SURVIVED", r"^mutant \S+ FAIL")
-POINTS += [(u, "mutant", MUTANT_OK, MUTANT_BAD, False) for u, *_ in NEW_UNITS]  # testbenches/mutant.sed: a planted fault the unit's own bench must fail
-POINTS += [("Common", "pkg_mutant", MUTANT_OK, MUTANT_BAD, False)]  # the define map's planted fault against TB_sienna_fmt_map
+POINTS += [(u, "mutant", MUTANT_OK, MUTANT_BAD, False) for u, *_ in NEW_UNITS]  # testbenches/units/<unit>_mutant.sed: a planted fault the unit's own bench must fail
+POINTS += [("common", "pkg_mutant", MUTANT_OK, MUTANT_BAD, False)]  # the define map's planted fault against TB_sienna_fmt_map
 def mutant_total():
-    """Fmt's mutant count: one per line of testbenches/mutants.list, two for a 'y' line (TB_fmt and the sweep)."""
-    rows = [ln.rstrip("\n").split("|") for ln in open(os.path.join(ROOT, "Fmt", "testbenches", "mutants.list")) if ln.strip() and not ln.startswith("#")]
+    """fmt's mutant count: one per line of testbenches/top/mutants.list, two for a 'y' line (TB_fmt and the sweep)."""
+    rows = [ln.rstrip("\n").split("|") for ln in open(os.path.join(ROOT, "testbenches", "top", "mutants.list")) if ln.strip() and not ln.startswith("#")]
     return sum(2 if r[6] == "y" else 1 for r in rows)
 
 
 MUTANT_TOTAL = mutant_total()
 FMT_POINTS = ("mul_fp32", "mul_bf16_o16", "mul_bf16_o32", "mul_int8_o16", "mul_int8_o32", "add_fp32", "add_bf16", "add_bf16_w16", "add_int8",
               "cmp_fp32", "cmp_bf16", "cmp_int8", "relu_fp32", "relu_bf16", "relu_int8")  # fmt_mul and fmt_add at every width, fmt_greater_than and fmt_relu, per define
-POINTS += [("Fmt", p, TB + (rf"^lint \S+ {p}: 0 library warnings, 0 new unit warnings \(\d+ in the recorded baseline\), 0 unplaced warnings, 0 errors$",), TB_BAD, True)
+POINTS += [("fmt", p, TB + (rf"^lint \S+ {p}: 0 library warnings, 0 new unit warnings \(\d+ in the recorded baseline\), 0 unplaced warnings, 0 errors$",), TB_BAD, True)
            for p in FMT_POINTS]  # lint clean: no warning in new code, none beyond the recorded baseline in the existing units
 POINTS += [
-    ("Fmt", "truefn", TB + (r"^truefn selftest: \d+ checks, 0 failures$", r"^test_truefn: \d+ checks, 0 failures$",
+    ("fmt", "truefn", TB + (r"^truefn selftest: \d+ checks, 0 failures$", r"^test_truefn: \d+ checks, 0 failures$",
                             r"^sweep selftest: \d+ checks, 0 failures$"), TB_BAD, True),
-    ("Fmt", "fmt_pkg", TB + (r"^fmt_pkg selftest: \d+ checks, 0 failures$",), TB_BAD, True),
-    ("Fmt", "check_fmt", (r"^check_fmt OK: the tree passes$", r"^check_fmt OK: C4 "), (r"check_fmt FAIL",), True),
-    ("Fmt", "controls", (r"^controls OK: FMT=fp16 stops make$", r"^controls OK: FMT_INT8 with FMT_BF16 ", r"^controls OK: FMT_INT8 with FMT_FP32 ",
+    ("fmt", "fmt_pkg", TB + (r"^fmt_pkg selftest: \d+ checks, 0 failures$",), TB_BAD, True),
+    ("fmt", "check_fmt", (r"^check_fmt OK: the tree passes$", r"^check_fmt OK: C4 "), (r"check_fmt FAIL",), True),
+    ("fmt", "controls", (r"^controls OK: FMT=fp16 stops make$", r"^controls OK: FMT_INT8 with FMT_BF16 ", r"^controls OK: FMT_INT8 with FMT_FP32 ",
                          r"^controls OK: FMT_BF16 with FMT_FP32 ", r"^controls OK: the elaboration check repeats it$", r"^controls OK: no define elaborates fp32$",
                          r"^controls OK: a sweep harness missing WRAPPER_DATA_WIDTH does not build$",
                          r"^controls OK: a sweep harness missing EXT_DATA_WIDTH does not build$", r"^controls OK: a misdecoded sweep fails: FAIL \(every gated row is decided by the floor\) ",
@@ -73,29 +73,29 @@ POINTS += [
      + tuple(rf"^controls OK: {w} refused$" for w in ("fp32 fmt_mul -GDATA_WIDTH=16", "bf16 fmt_mul -GEXT_DATA_WIDTH=24", "int8 fmt_mul -GDATA_WIDTH=16",
                                                      "int8 fmt_mul -GEXT_DATA_WIDTH=12", "bf16 fmt_add -GDATA_WIDTH=8", "int8 fmt_add -GDATA_WIDTH=8")),
      (r"controls FAIL",), True),
-    ("Fmt", "mutants", (rf"^mutants: {MUTANT_TOTAL} of {MUTANT_TOTAL} caught$",), (r"SURVIVED",), False),  # pinned to the list; lines quote failures
-    ("Fmt", "lint_tops", tuple(rf"^lint fmt_fn_\w+ {n}: 0 library warnings, 0 new unit warnings \(\d+ in the recorded baseline\), 0 unplaced warnings, 0 errors$"
+    ("fmt", "mutants", (rf"^mutants: {MUTANT_TOTAL} of {MUTANT_TOTAL} caught$",), (r"SURVIVED",), False),  # pinned to the list; lines quote failures
+    ("fmt", "lint_tops", tuple(rf"^lint fmt_fn_\w+ {n}: 0 library warnings, 0 new unit warnings \(\d+ in the recorded baseline\), 0 unplaced warnings, 0 errors$"
                               for n in ("narrow_fp32", "narrow_bf16", "requantize_int8", "quantized_add_int8")), (r"NEW WARNING", r"UNPLACED"), True),
-    ("Fmt", "equiv_quick", TB + (r"^EQUIV: 4 of 4 pairs equal$",), TB_BAD, True),  # make -C Fmt equiv is the proof; this runs its harness on a slice
+    ("fmt", "equiv_quick", TB + (r"^EQUIV: 4 of 4 pairs equal$",), TB_BAD, True),  # make fmt-equiv is the proof; this runs its harness on a slice
 ]
 CREDIT_OK = 11  # TB_credit_link: 8 (STAGES, MODE) runs and 3 $fatal modes, one 'credit OK' line each
-LINT_RUNS = {"Adders/Int/lint": 1, "Multipliers/Int/lint": 2, "Requantizer/lint": 2, "QuantizedAdder/lint": 2}  # Common/lint.sh lines each lint prints, one per configuration
+LINT_RUNS = {"intAdder/lint": 1, "intMultiplier/lint": 2, "int8Requantizer/lint": 2, "int8QuantizedAdder/lint": 2}  # scripts/lint.sh lines each lint prints, one per configuration
 LINT_RUNS.update({f"{u}/lint": 1 for u, *_ in NEW_UNITS})
 TABLE = {f"{u}/{t}": (u, t, need, bad, firing) for u, t, need, bad, firing in POINTS}
 # ── SIM=vcs: each point's VCS target, the Verilator-only points, and the VCS lint labels ──
 VCS_TARGET = {"verilator": "vcs", "verilator16": "vcs16"}  # the reference benches' VCS targets; every other target takes SIM=vcs itself
 VERILATOR_ONLY = {  # point (or target) -> why it means nothing under VCS
     "vivado_tb": "a Vivado bench, run here on Verilator; the Vivado removal takes it out",
-    "Fmt/controls": "Verilator's lint and preprocessor messages and its C++ sweep harness (sweep_fmt.cpp) are what it checks",
-    "Fmt/mutants": "each kill is judged by TB_fmt and by a Verilator C++ sweep harness (sweep_fmt.cpp drives a Verilated model)",
-    "Fmt/lint_tops": "verilator --lint-only against Verilator's recorded lint baseline; the unit lint points run VCS's +lint=all",
-    "Fmt/equiv_quick": "a Verilator C++ harness (eq_fmt.cpp drives Verilated models)",
+    "fmt/controls": "Verilator's lint and preprocessor messages and its C++ sweep harness (sweep_fmt.cpp) are what it checks",
+    "fmt/mutants": "each kill is judged by TB_fmt and by a Verilator C++ sweep harness (sweep_fmt.cpp drives a Verilated model)",
+    "fmt/lint_tops": "verilator --lint-only against Verilator's recorded lint baseline; the unit lint points run VCS's +lint=all",
+    "fmt/equiv_quick": "a Verilator C++ harness (eq_fmt.cpp drives Verilated models)",
 }
-VCS_LINT_LABELS = {"Adders/Int/lint": ("intAdder",), "Multipliers/Int/lint": ("intMultiplier W=8", "intMultiplier W=16"),
-                   "Requantizer/lint": ("int8Requantizer", "int8Requantizer (assertions)"),
-                   "QuantizedAdder/lint": ("int8QuantizedAdder", "int8QuantizedAdder (assertions)")}
+VCS_LINT_LABELS = {"intAdder/lint": ("intAdder",), "intMultiplier/lint": ("intMultiplier W=8", "intMultiplier W=16"),
+                   "int8Requantizer/lint": ("int8Requantizer", "int8Requantizer (assertions)"),
+                   "int8QuantizedAdder/lint": ("int8QuantizedAdder", "int8QuantizedAdder (assertions)")}
 VCS_LINT_LABELS.update({f"{u}/lint": (top,) for u, top, _ in NEW_UNITS})
-VCS_LINT_BASELINE = os.path.join(ROOT, "vcs_lint_baseline.txt")  # written by make -C <unit> lint SIM=vcs RECORD=1 on a real VCS run
+VCS_LINT_BASELINE = os.path.join(ROOT, "vcs_lint_baseline.txt")  # written by make <unit>-lint SIM=vcs RECORD=1 on a real VCS run
 
 
 def vcs_lint_recorded(labels, path=VCS_LINT_BASELINE):
@@ -107,7 +107,7 @@ def vcs_lint_recorded(labels, path=VCS_LINT_BASELINE):
 class ArilSpec(regress.Spec):
     title = "ARITHMETICLIBRARY REGRESSION"
     artifacts = ()  # each bench's dumps stay in its Verilator directory
-    drop = ("RANDOM",)  # Requantizer's and QuantizedAdder's Makefiles take it with ?=: a caller's would change a point's vectors (FMT: regress.MAKE_VARS)
+    drop = ("RANDOM",)  # the Makefile's int8Requantizer and int8QuantizedAdder recipes take it with ?=: a caller's would change a point's vectors (FMT: regress.MAKE_VARS)
 
     def points(self, small, formats):
         return ["selftest"] + list(TABLE)
@@ -122,8 +122,8 @@ class ArilSpec(regress.Spec):
             return [sys.executable, "regression.py", "--action", "selftest"]
         u, t = TABLE[name][:2]
         if self.sim == "vcs":
-            return ["make", "-C", u, VCS_TARGET.get(t, t), "SIM=vcs"]
-        return ["make", "-C", u, t]
+            return ["make", f"{u}-{VCS_TARGET.get(t, t)}", "SIM=vcs"]
+        return ["make", f"{u}-{t}"]
 
     def not_applicable(self, name):
         if self.sim != "vcs" or name == "selftest":
@@ -150,7 +150,7 @@ class ArilSpec(regress.Spec):
 
 
     def vcs_verdict(self, name, text, rc):
-        """The Verilator gate less what only Verilator prints: a VCS lint's own count lines, credit's lint line, the Fmt points' lint line."""
+        """The Verilator gate less what only Verilator prints: a VCS lint's own count lines, credit's lint line, the fmt points' lint line."""
         u, t, need, bad, firing = TABLE[name]
         if name in VCS_LINT_LABELS:
             v = regress.marker_verdict(text, rc, (), (r"NEW WARNING", r"^vcs lint .*: FAIL"), True)
@@ -159,7 +159,7 @@ class ArilSpec(regress.Spec):
             return v if v != "PASS" else ("PASS" if sorted(labels) == sorted(want) else f"FAIL ({len(labels)} of {len(want)} VCS lint runs counted)")
         if t == "credit":
             need = (r"^credit lint: not applicable to VCS",)
-        if u == "Fmt" and t in FMT_POINTS:
+        if u == "fmt" and t in FMT_POINTS:
             need = TB + (rf"^lint {t}: not applicable to VCS",)
         v = regress.marker_verdict(text, rc, need, bad, firing)
         if v == "PASS" and t == "credit":
@@ -258,23 +258,23 @@ def test_verdict_rules():
     assert v("%Error: bad\nREJECTED\n", 0, (r"^REJECTED$",), (), False) == "PASS" and v("%Error: bad\nREJECTED\n", 0, (r"^REJECTED$",)) == "FAIL (log: %Error: bad)"
     assert v("%Warning-LATCH: x.sv:3: latch\n", 0, (), LINT_BAD) == "FAIL (log: %Warning-LATCH: x.sv:3: latch)" and v("%Warning-UNUSED: y\n", 0, (), LINT_BAD) == "PASS"
     ok = "credit lint: 0 warnings, 0 errors\n" + "credit OK: m\n" * CREDIT_OK
-    assert SPEC.verdict("Common/credit", ok, 0) == "PASS" and SPEC.verdict("Common/credit", ok.replace("credit OK: m\n", "", 1), 0) == "FAIL (10 of 11 credit checks passed)"
-    assert SPEC.verdict("Common/credit", ok + "credit FAIL: STAGES=0 MODE=1\n", 1) == "FAIL (exit 1)"
-    assert SPEC.verdict("Common/credit", ok + "credit OK: MODE=8 fired: [0] %Fatal: credit_reg.sv:14: Assertion failed in TB\n", 0) == "FAIL (12 of 11 credit checks passed)"
-    assert SPEC.verdict("Adders/FP32/verilator", "SUCCESS: All 30000 vectors passed!\n", 0) == "PASS"
-    assert SPEC.verdict("Adders/FP32/verilator", "FAILURE: 3 errors detected.\n", 0).startswith("FAIL")
-    assert SPEC.verdict("Multipliers/Karatsuba/verilator", "PASS: Unsigned(10) and Signed(10) vectors passed.\n", 0) == "PASS"
-    assert SPEC.verdict("Converters/FP32ToBF16/check", "RESULT: PASSED\n", 0) == "FAIL (no 'fp32ToBf16: \\d+ .* 0 errors')"
+    assert SPEC.verdict("common/credit", ok, 0) == "PASS" and SPEC.verdict("common/credit", ok.replace("credit OK: m\n", "", 1), 0) == "FAIL (10 of 11 credit checks passed)"
+    assert SPEC.verdict("common/credit", ok + "credit FAIL: STAGES=0 MODE=1\n", 1) == "FAIL (exit 1)"
+    assert SPEC.verdict("common/credit", ok + "credit OK: MODE=8 fired: [0] %Fatal: credit_reg.sv:14: Assertion failed in TB\n", 0) == "FAIL (12 of 11 credit checks passed)"
+    assert SPEC.verdict("fp32Adder/verilator", "SUCCESS: All 30000 vectors passed!\n", 0) == "PASS"
+    assert SPEC.verdict("fp32Adder/verilator", "FAILURE: 3 errors detected.\n", 0).startswith("FAIL")
+    assert SPEC.verdict("karatsuba/verilator", "PASS: Unsigned(10) and Signed(10) vectors passed.\n", 0) == "PASS"
+    assert SPEC.verdict("fp32ToBf16/check", "RESULT: PASSED\n", 0) == "FAIL (no 'fp32ToBf16: \\d+ .* 0 errors')"
     tr = "truth selftest: 126 checks, 0 failures\nRESULT: PASSED\ntest_truth: 97 checks, 0 failures\nRESULT: PASSED\n"
-    assert SPEC.verdict("Common/truth", tr, 0) == "PASS" and SPEC.verdict("Common/truth", tr.split("test_truth")[1], 0).startswith("FAIL (no 'truth selftest")  # the selftest must have run
-    assert SPEC.verdict("Common/truth", tr.replace("PASSED\ntest", "FAILED\ntest"), 0).startswith("FAIL (log: RESULT: FAILED")
-    assert SPEC.verdict("Requantizer/shift_bad", "%Error: int8Requantizer: shift 56 above 55\nFIRED\n", 0) == "PASS"  # its own %Error is the point
-    assert SPEC.verdict("Requantizer/shift_bad", "NOT-FIRED\n", 2).startswith("FAIL")  # the assertion did not fire
+    assert SPEC.verdict("common/truth", tr, 0) == "PASS" and SPEC.verdict("common/truth", tr.split("test_truth")[1], 0).startswith("FAIL (no 'truth selftest")  # the selftest must have run
+    assert SPEC.verdict("common/truth", tr.replace("PASSED\ntest", "FAILED\ntest"), 0).startswith("FAIL (log: RESULT: FAILED")
+    assert SPEC.verdict("int8Requantizer/shift_bad", "%Error: int8Requantizer: shift 56 above 55\nFIRED\n", 0) == "PASS"  # its own %Error is the point
+    assert SPEC.verdict("int8Requantizer/shift_bad", "NOT-FIRED\n", 2).startswith("FAIL")  # the assertion did not fire
     assert SPEC.verdict("selftest", "ALL 9 PASSED\n", 0) == "PASS" and SPEC.verdict("selftest", "1 of 9 FAILED\n", 0).startswith("FAIL")
     two = "lint intMultiplier WIDTH=8: 3 warnings, 0 errors\nlint intMultiplier WIDTH=16: 2 warnings, 0 errors\n"
-    assert SPEC.verdict("Multipliers/Int/lint", two, 0) == "PASS" and SPEC.verdict("Multipliers/Int/lint", "", 0) == "FAIL (0 of 2 lint runs counted)"  # a clean exit is not a lint
-    assert SPEC.verdict("Multipliers/Int/lint", two.split("\n")[0] + "\n", 0) == "FAIL (1 of 2 lint runs counted)"
-    assert SPEC.verdict("Multipliers/Int/lint", two.replace("0 errors\nlint intMultiplier WIDTH=16", "1 errors\nlint intMultiplier WIDTH=16"), 0).startswith("FAIL")
+    assert SPEC.verdict("intMultiplier/lint", two, 0) == "PASS" and SPEC.verdict("intMultiplier/lint", "", 0) == "FAIL (0 of 2 lint runs counted)"  # a clean exit is not a lint
+    assert SPEC.verdict("intMultiplier/lint", two.split("\n")[0] + "\n", 0) == "FAIL (1 of 2 lint runs counted)"
+    assert SPEC.verdict("intMultiplier/lint", two.replace("0 errors\nlint intMultiplier WIDTH=16", "1 errors\nlint intMultiplier WIDTH=16"), 0).startswith("FAIL")
 
 
 @selftest
@@ -283,42 +283,45 @@ def test_points_and_commands():
     assert pts == SPEC.points(True, []) and pts[0] == "selftest" and len(pts) == len(set(pts)) == 1 + len(POINTS), len(pts)
     for name in pts:
         u = name.rsplit("/", 1)[0]
-        assert name == "selftest" or os.path.isfile(os.path.join(ROOT, u, "Makefile")), name
-    assert SPEC.argv("Requantizer/shift_bad", None) == ["make", "-C", "Requantizer", "shift_bad"]
-    for name in pts[1:]:  # every target exists in its unit's Makefile
+        assert name == "selftest" or u in MAKE_UNITS, name
+    assert SPEC.argv("int8Requantizer/shift_bad", None) == ["make", "int8Requantizer-shift_bad"]
+    for name in pts[1:]:  # every target exists in the Makefile
         u, t = TABLE[name][:2]
-        r = subprocess.run(["make", "-n", "-C", os.path.join(ROOT, u), t], capture_output=True, text=True, env={k: v for k, v in os.environ.items() if not k.startswith("MAKE")})
+        r = subprocess.run(["make", "-n", "-C", ROOT, f"{u}-{t}"], capture_output=True, text=True, env={k: v for k, v in os.environ.items() if not k.startswith("MAKE")})
         assert r.returncode == 0, (name, r.stderr[-200:])
         n_bin = r.stdout.count("--binary")
         assert r.stdout.count("--build-jobs 0") >= n_bin and (not n_bin or f"-j {regress._cores()} " in r.stdout), name  # every Verilator build takes every core, in parallel
     for name in [p for p in pts if p.endswith("/lint")]:  # every lint prints its counts, one line per configuration
-        r = subprocess.run(["make", "-n", "-C", os.path.join(ROOT, name[:-5]), "lint"], capture_output=True, text=True)
-        assert len(re.findall(r"(?m)^bash \S+/Common/lint\.sh ", r.stdout)) == LINT_RUNS[name], (name, r.stdout[-300:])  # through bash: a clone may drop the x bit
-    for u in ("Adders/FP32", "Multipliers/FP32", "Multipliers/Karatsuba"):  # the threaded benches take their share under make -j
-        r = subprocess.run(["make", "-n", "-C", os.path.join(ROOT, u), "verilator", "SIM_THREADS=3"], capture_output=True, text=True)
+        r = subprocess.run(["make", "-n", "-C", ROOT, f"{name[:-5]}-lint"], capture_output=True, text=True)
+        assert len(re.findall(r"(?m)^bash \S+/scripts/lint\.sh ", r.stdout)) == LINT_RUNS[name], (name, r.stdout[-300:])  # through bash: a clone may drop the x bit
+    for u in ("fp32Adder", "fp32Multiplier", "karatsuba"):  # the threaded benches take their share under make -j
+        r = subprocess.run(["make", "-n", "-C", ROOT, f"{u}-verilator", "SIM_THREADS=3"], capture_output=True, text=True)
         assert "--threads 3" in r.stdout, (u, r.stdout[-300:])
-        r = subprocess.run(["make", "-n", "-C", os.path.join(ROOT, u), "verilator"], capture_output=True, text=True, env={k: v for k, v in os.environ.items() if k != "SIM_THREADS" and not k.startswith("MAKE")})
+        r = subprocess.run(["make", "-n", "-C", ROOT, f"{u}-verilator"], capture_output=True, text=True, env={k: v for k, v in os.environ.items() if k != "SIM_THREADS" and not k.startswith("MAKE")})
         assert re.search(r"--threads 1(?!\d)", r.stdout), (u, r.stdout[-300:])  # a lone small bench simulates on one thread
     try:
-        SPEC.parse("Adders/Int/nosuch")
+        SPEC.parse("intAdder/nosuch")
     except ValueError:
         pass
     else:
-        raise AssertionError("parse accepted Adders/Int/nosuch")
+        raise AssertionError("parse accepted intAdder/nosuch")
 
 
-NO_POINT_SRC = ("Divider/FP32", "Multipliers/Radix4Booth")  # sources with no bench of their own: fp32Divider (no instance since GPNAE's Taylor lane), R4Booth (in Karatsuba's)
+NO_POINT_SRC = ("src/dividers/fp32Divider.sv", "src/dividers/divu.sv", "src/multipliers/R4Booth.sv")  # sources with no bench of their own: fp32Divider (no instance since GPNAE's Taylor lane), R4Booth (in karatsuba's)
+MAKE_UNITS = re.search(r"(?m)^UNITS\s*=((?:.*\\\n)*.*)$", open(os.path.join(ROOT, "Makefile")).read()).group(1).replace("\\", " ").split()  # the Makefile's units
 
 
 @selftest
 def test_every_unit_has_points():
-    """Every unit directory with a Makefile or a src/ directory appears in POINTS, so a new unit cannot be left out of make regression."""
-    mk = glob.glob(os.path.join(ROOT, "*", "Makefile")) + glob.glob(os.path.join(ROOT, "*", "*", "Makefile"))
-    src = glob.glob(os.path.join(ROOT, "*", "src")) + glob.glob(os.path.join(ROOT, "*", "*", "src"))
-    units = sorted({os.path.relpath(os.path.dirname(p), ROOT) for p in mk + src} - set(NO_POINT_SRC))
+    """Every unit of the Makefile appears in POINTS and every unit bench is named in the Makefile, so a new unit cannot be left out of make regression."""
     listed = {u for u, *_ in POINTS}
-    missing = [u for u in units if u not in listed]
-    assert len(units) >= 17 and not missing, f"units without a make regression point: {missing}"
+    missing = [u for u in MAKE_UNITS if u not in listed]
+    assert len(MAKE_UNITS) >= 17 and not missing and listed <= set(MAKE_UNITS), f"units without a make regression point: {missing}"
+    mk = open(os.path.join(ROOT, "Makefile")).read()
+    benches = [os.path.basename(p)[:-3] for p in glob.glob(os.path.join(ROOT, "testbenches", "*", "TB_*.sv"))]
+    orphans = [b for b in benches if b not in mk and b[3:] not in mk]
+    assert len(benches) >= 18 and not orphans, f"benches the Makefile never names: {orphans}"
+    assert all(os.path.exists(os.path.join(ROOT, p)) for p in NO_POINT_SRC)
 
 
 @selftest
@@ -332,20 +335,20 @@ def test_every_new_unit_has_its_bench():
 
 @selftest
 def test_mutants_are_pinned():
-    """Fmt/mutants passes only at the list's full count, and every per-format unit has a planted fault of its own."""
+    """fmt/mutants passes only at the list's full count, and every per-format unit has a planted fault of its own."""
     assert MUTANT_TOTAL >= 30
-    assert SPEC.verdict("Fmt/mutants", f"mutants: {MUTANT_TOTAL} of {MUTANT_TOTAL} caught\n", 0) == "PASS"
-    assert SPEC.verdict("Fmt/mutants", f"mutants: {MUTANT_TOTAL - 1} of {MUTANT_TOTAL - 1} caught\n", 0) != "PASS"
+    assert SPEC.verdict("fmt/mutants", f"mutants: {MUTANT_TOTAL} of {MUTANT_TOTAL} caught\n", 0) == "PASS"
+    assert SPEC.verdict("fmt/mutants", f"mutants: {MUTANT_TOTAL - 1} of {MUTANT_TOTAL - 1} caught\n", 0) != "PASS"
     for u, *_ in NEW_UNITS:
-        assert f"{u}/mutant" in TABLE and os.path.exists(os.path.join(ROOT, u, "testbenches", "mutant.sed")), u
+        assert f"{u}/mutant" in TABLE and os.path.exists(os.path.join(ROOT, "testbenches", "units", f"{u}_mutant.sed")), u
         assert SPEC.verdict(f"{u}/mutant", "mutant x SURVIVED its bench\n", 1) != "PASS", u
-    assert SPEC.verdict("Common/pkg_mutant", "mutant x caught by its bench: 1 errors\n", 0) == "PASS"
+    assert SPEC.verdict("common/pkg_mutant", "mutant x caught by its bench: 1 errors\n", 0) == "PASS"
 
 
 @selftest
 def test_fmt_points_match_the_makefile():
-    """FMT_POINTS is Fmt/Makefile's point list (make -C Fmt points), so a point added there cannot be left out of make regression."""
-    r = subprocess.run(["make", "-s", "--no-print-directory", "-C", os.path.join(ROOT, "Fmt"), "points"], capture_output=True, text=True,
+    """FMT_POINTS is the Makefile's fmt point list (make fmt-points), so a point added there cannot be left out of make regression."""
+    r = subprocess.run(["make", "-s", "--no-print-directory", "-C", ROOT, "fmt-points"], capture_output=True, text=True,
                        env={k: v for k, v in os.environ.items() if not k.startswith("MAKE")})
     mk = r.stdout.split()
     assert r.returncode == 0 and mk, r.stderr[-200:]
@@ -361,8 +364,8 @@ controls OK: no define elaborates fp32
 controls OK: a sweep harness missing WRAPPER_DATA_WIDTH does not build
 controls OK: a sweep harness missing EXT_DATA_WIDTH does not build
 controls OK: a misdecoded sweep fails: FAIL (every gated row is decided by the floor) (n 16777216 miss 0, floor_only 16777216)
-controls OK: a warning planted in existing code fails the lint gate: NEW WARNING add_fp32: %Warning-UNUSEDSIGNAL: Adders/FP32/src/fp32Adder.sv:266
-controls OK: a warning planted in new code fails the lint gate: NEW WARNING add_fp32: %Warning-UNUSEDSIGNAL: Fmt/src/fmt_add.sv:45
+controls OK: a warning planted in existing code fails the lint gate: NEW WARNING add_fp32: %Warning-UNUSEDSIGNAL: src/adders/fp32Adder.sv:266
+controls OK: a warning planted in new code fails the lint gate: NEW WARNING add_fp32: %Warning-UNUSEDSIGNAL: src/fmt/fmt_add.sv:45
 controls OK: a %Warning line with no location fails the lint gate
 controls OK: make lint-baseline refuses to re-record over a changed existing file
 controls OK: fp32 fmt_mul -GDATA_WIDTH=16 refused
@@ -371,20 +374,21 @@ controls OK: int8 fmt_mul -GDATA_WIDTH=16 refused
 controls OK: int8 fmt_mul -GEXT_DATA_WIDTH=12 refused
 controls OK: bf16 fmt_add -GDATA_WIDTH=8 refused
 controls OK: int8 fmt_add -GDATA_WIDTH=8 refused
-"""  # make -C Fmt controls (lane C's run rs3_r6_n1_green), the planted-warning lines cut short
+"""  # make fmt-controls (lane C's run rs3_r6_n1_green), the planted-warning lines cut short
 
 
 @selftest
 def test_every_control_is_required():
-    """Fmt/controls passes only with every control's OK line, and every 'controls OK' echo in Fmt/Makefile has a line here."""
+    """fmt/controls passes only with every control's OK line, and every 'controls OK' echo of the Makefile's fmt-controls has a line here."""
     v = SPEC.verdict
-    assert v("Fmt/controls", CONTROL_LINES, 0) == "PASS"
+    assert v("fmt/controls", CONTROL_LINES, 0) == "PASS"
     lines = CONTROL_LINES.splitlines(keepends=True)
-    kept = [ln for i, ln in enumerate(lines) if v("Fmt/controls", "".join(lines[:i] + lines[i + 1:]), 0) == "PASS"]
+    kept = [ln for i, ln in enumerate(lines) if v("fmt/controls", "".join(lines[:i] + lines[i + 1:]), 0) == "PASS"]
     assert not kept, f"controls passes without: {kept}"
     other = CONTROL_LINES.replace("FAIL (every gated row is decided by the floor)", "FAIL (3 misses beyond the bound)")
-    assert v("Fmt/controls", other, 0) != "PASS", "the misdecode control passes on a FAIL other than its floor-decided one"
-    mk = open(os.path.join(ROOT, "Fmt", "Makefile")).read()
+    assert v("fmt/controls", other, 0) != "PASS", "the misdecode control passes on a FAIL other than its floor-decided one"
+    mk = open(os.path.join(ROOT, "Makefile")).read()
+    mk = mk[mk.index("\nfmt-controls:"):mk.index("\n# ── mutants")]  # the controls' recipe
     for echo in re.findall(r'echo "controls OK: ([^"$]*)', mk):
         assert any(ln.startswith("controls OK: " + echo) for ln in lines), f"no control line for the echo 'controls OK: {echo}'"
     assert len(re.findall(r"\$\(call bad_width,", mk)) == sum(ln.endswith(" refused\n") for ln in lines)
@@ -392,16 +396,19 @@ def test_every_control_is_required():
 
 @selftest
 def test_point_drops_unit_variables():
-    """A point never sees the caller's RANDOM, which the Requantizer and QuantizedAdder Makefiles take with ?=."""
+    """A point never sees the caller's RANDOM, which the Makefile's int8Requantizer and int8QuantizedAdder recipes take with ?=."""
     names = ("RANDOM",)
     saved = {k: os.environ.get(k) for k in names}
     os.environ.update(RANDOM="10")
     try:
-        env = regress.point_env(SPEC, "QuantizedAdder/verilator", "s", 8)
+        env = regress.point_env(SPEC, "int8QuantizedAdder/verilator", "s", 8)
     finally:
         for k, v in saved.items():
             os.environ.pop(k) if v is None else os.environ.__setitem__(k, v)
     assert not set(names) & set(env), sorted(set(names) & set(env))
+
+
+RUN_CHECKED_UNITS = ("int8Requantizer", "int8QuantizedAdder")  # the units whose recipes run through the Makefile's RUN_CHECKED gate
 
 
 @selftest
@@ -410,9 +417,9 @@ def test_make_echo_does_not_fire_the_scan():
     bad = []
     for name in SPEC.points(False, [])[1:]:
         u, t = TABLE[name][:2]
-        if not re.search(r"(?m)^RUN_CHECKED\s*=", open(os.path.join(ROOT, u, "Makefile")).read()):
+        if u not in RUN_CHECKED_UNITS:
             continue
-        r = subprocess.run(["make", "-n", "-C", os.path.join(ROOT, u), t], capture_output=True, text=True, env={k: v for k, v in os.environ.items() if not k.startswith("MAKE")})
+        r = subprocess.run(["make", "-n", "-C", ROOT, f"{u}-{t}"], capture_output=True, text=True, env={k: v for k, v in os.environ.items() if not k.startswith("MAKE")})
         m = regress.FIRING.search(r.stdout)
         if m and TABLE[name][4]:  # lint_bad shows its own %Error: its point does not scan
             bad.append((name, m.group(0).strip()[:60]))
@@ -593,8 +600,8 @@ def test_regression_target():
     names = [x.split("--name ")[1].split()[0] for x in lines if "--action point " in x]
     assert r.returncode == 0 and names == SPEC.points(False, []), (r.stderr, names[:3])
     assert all("--run " in x and x.rstrip().endswith("--keep-going") for x in lines if "--action point " in x) and "--action summary" in lines[-1] and "--run " in lines[-1], lines[-1]
-    one = run("regression/Requantizer/lint").stdout.splitlines()
-    assert len(one) == 1 and "--name Requantizer/lint" in one[0] and "--keep-going" not in one[0] and "--run" not in one[0], one
+    one = run("regression/int8Requantizer/lint").stdout.splitlines()
+    assert len(one) == 1 and "--name int8Requantizer/lint" in one[0] and "--keep-going" not in one[0] and "--run" not in one[0], one
     s = run("regression-summary").stdout.splitlines()
     assert len(s) == 1 and "--action summary" in s[0] and "--run" not in s[0], s
 
@@ -626,15 +633,15 @@ def test_vcs_points_name_vcs():
             assert "-debug" not in r.stdout and "+v2k" not in r.stdout, (name, "VCS builds stay plain")
     assert set(na) == {n for n in TABLE if n.endswith("/vivado_tb")} | {k for k in VERILATOR_ONLY if "/" in k}, na
     assert runs >= 40, runs  # the simulations and VCS lints; the Python-only points (ipu, fpu, truth, truefn, ...) need no simulator
-    assert spec.argv("Multipliers/Int/verilator16", None) == ["make", "-C", "Multipliers/Int", "vcs16", "SIM=vcs"]
-    assert SPEC.argv("Multipliers/Int/verilator16", None) == ["make", "-C", "Multipliers/Int", "verilator16"]  # Verilator as before
-    r = subprocess.run(["make", "-s", "-n", "-C", "Multipliers/BF16", "vcs", "TRACE=1"], cwd=ROOT, capture_output=True, text=True, env=env)
+    assert spec.argv("intMultiplier/verilator16", None) == ["make", "intMultiplier-vcs16", "SIM=vcs"]
+    assert SPEC.argv("intMultiplier/verilator16", None) == ["make", "intMultiplier-verilator16"]  # Verilator as before
+    r = subprocess.run(["make", "-s", "-n", "bf16Multiplier-vcs", "TRACE=1"], cwd=ROOT, capture_output=True, text=True, env=env)
     assert "-debug_access+all +define+ENABLE_TRACE" in r.stdout and "+vcs+dumpvarsoff" not in r.stdout, r.stdout[-300:]  # waveforms only with TRACE=1
-    r = subprocess.run(["make", "-s", "-n", "-C", "Multipliers/BF16", "vcs", "RANDINIT=1", "SEED=7", "XPROP=1"], cwd=ROOT, capture_output=True, text=True, env=env)
+    r = subprocess.run(["make", "-s", "-n", "bf16Multiplier-vcs", "RANDINIT=1", "SEED=7", "XPROP=1"], cwd=ROOT, capture_output=True, text=True, env=env)
     assert "+vcs+initreg+random +define+NO_ZERO_INIT" in r.stdout and "./sim +vcs+initreg+7 " in r.stdout and "-xprop=tmerge" in r.stdout, r.stdout[-400:]
-    r = subprocess.run(["make", "-s", "-n", "-C", "Multipliers/BF16", "vcs", "SIM=verilator"], cwd=ROOT, capture_output=True, text=True, env=env)
+    r = subprocess.run(["make", "-s", "-n", "bf16Multiplier-vcs", "SIM=verilator"], cwd=ROOT, capture_output=True, text=True, env=env)
     assert r.returncode != 0 and "contradicts" in r.stderr, r.stderr
-    r = subprocess.run(["make", "-s", "-n", "-C", "Multipliers/BF16", "verilator", "SIM=questa"], cwd=ROOT, capture_output=True, text=True, env=env)
+    r = subprocess.run(["make", "-s", "-n", "bf16Multiplier-verilator", "SIM=questa"], cwd=ROOT, capture_output=True, text=True, env=env)
     assert r.returncode != 0 and "SIM=questa: not one of verilator vcs" in r.stderr, r.stderr
 
 
@@ -643,27 +650,27 @@ def test_vcs_verdicts():
     """The VCS gates: an x word fails with its line, a VCS assertion fires the scan, a VCS lint reports until its baseline is recorded."""
     spec = _vcs_spec()
     v = spec.verdict
-    assert v("Adders/Int/check", "RESULT: PASSED\nFAIL: X in output word 37 of test add (add_int32.txt) ('xxxxxxxx')\nRESULT: FAILED\n", 1) \
+    assert v("intAdder/check", "RESULT: PASSED\nFAIL: X in output word 37 of test add (add_int32.txt) ('xxxxxxxx')\nRESULT: FAILED\n", 1) \
         == "FAIL (X in output word 37 of test add (add_int32.txt) ('xxxxxxxx'))"
-    assert SPEC.verdict("Adders/Int/check", "FAIL: Z in output word 2 of test t\n", 0).startswith("FAIL (Z in output word 2")  # Verilator's gate too
-    assert v("Multipliers/Int8/verilator", "int8Multiplier: 65536 pairs, 0 errors\nRESULT: PASSED\n", 0) == "PASS"
+    assert SPEC.verdict("intAdder/check", "FAIL: Z in output word 2 of test t\n", 0).startswith("FAIL (Z in output word 2")  # Verilator's gate too
+    assert v("int8Multiplier/verilator", "int8Multiplier: 65536 pairs, 0 errors\nRESULT: PASSED\n", 0) == "PASS"
     fired = 'Error: "/t/src/credit_counter.sv", 25: TB.u.a_no_underflow: at time 105 ns\n'
-    assert v("Multipliers/Int8/verilator", "int8Multiplier: 65536 pairs, 0 errors\nRESULT: PASSED\n" + fired, 0).startswith("FAIL (log: Error:")
-    assert v("Adders/Int/verilator", 'RESULT: PASSED\n"/t/a.sv", 9: TB.a1: started at 5ns failed at 5ns\n', 0).startswith("FAIL (log:")
-    assert v("Adders/Int/verilator", "RESULT: PASSED\nError-[DPI-DIFNF] DPI function not found\n", 0).startswith("FAIL (log: Error-[")
+    assert v("int8Multiplier/verilator", "int8Multiplier: 65536 pairs, 0 errors\nRESULT: PASSED\n" + fired, 0).startswith("FAIL (log: Error:")
+    assert v("intAdder/verilator", 'RESULT: PASSED\n"/t/a.sv", 9: TB.a1: started at 5ns failed at 5ns\n', 0).startswith("FAIL (log:")
+    assert v("intAdder/verilator", "RESULT: PASSED\nError-[DPI-DIFNF] DPI function not found\n", 0).startswith("FAIL (log: Error-[")
     ok = "credit lint: not applicable to VCS (verilator --lint-only -Wall)\n" + "credit OK: m\n" * CREDIT_OK
-    assert v("Common/credit", ok, 0) == "PASS" and v("Common/credit", ok.replace("credit OK: m\n", "", 1), 0).startswith("FAIL (10 of 11")
+    assert v("common/credit", ok, 0) == "PASS" and v("common/credit", ok.replace("credit OK: m\n", "", 1), 0).startswith("FAIL (10 of 11")
     fmt = "lint mul_fp32: not applicable to VCS (x)\nTB_fmt mul fp32: 200000 vectors, 0 word errors\nRESULT: PASSED\n"
-    assert v("Fmt/mul_fp32", fmt, 0) == "PASS" and v("Fmt/mul_fp32", fmt.split("\n", 1)[1], 0).startswith("FAIL (no 'lint mul_fp32")
+    assert v("fmt/mul_fp32", fmt, 0) == "PASS" and v("fmt/mul_fp32", fmt.split("\n", 1)[1], 0).startswith("FAIL (no 'lint mul_fp32")
     lint = "vcs lint intMultiplier W=8: 3 warnings, 0 errors\nvcs lint intMultiplier W=16: 2 warnings, 0 errors\n"
-    assert v("Multipliers/Int/lint", lint, 0) == "PASS" and v("Multipliers/Int/lint", lint.split("\n")[0] + "\n", 0).startswith("FAIL (1 of 2")
-    assert v("Multipliers/Int/lint", lint + "vcs lint intMultiplier W=8: NEW WARNING PCWM-L in intMultiplier.sv: 2 against 1 recorded\n", 1).startswith("FAIL")
+    assert v("intMultiplier/lint", lint, 0) == "PASS" and v("intMultiplier/lint", lint.split("\n")[0] + "\n", 0).startswith("FAIL (1 of 2")
+    assert v("intMultiplier/lint", lint + "vcs lint intMultiplier W=8: NEW WARNING PCWM-L in intMultiplier.sv: 2 against 1 recorded\n", 1).startswith("FAIL")
     with tempfile.TemporaryDirectory() as d:
         b = os.path.join(d, "b.txt")
         assert not vcs_lint_recorded(("intAdder",), b)
         open(b, "w").write("# header\nintAdder\t-\t-\t0\n")
         assert vcs_lint_recorded(("intAdder",), b) and not vcs_lint_recorded(("intMultiplier W=8",), b)
-    assert spec.gated("Adders/Int/check") and (spec.gated("Adders/Int/lint") == vcs_lint_recorded(("intAdder",))) and SPEC.gated("Adders/Int/lint")
+    assert spec.gated("intAdder/check") and (spec.gated("intAdder/lint") == vcs_lint_recorded(("intAdder",))) and SPEC.gated("intAdder/lint")
 
 
 @selftest
