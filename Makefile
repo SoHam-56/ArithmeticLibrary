@@ -36,17 +36,29 @@ PKG     = $(SRC)/fmt/sienna_fmt_pkg.sv
 default: help
 
 help:
-	@echo "  make regression            - every unit bench and model check (regression.py --action points lists them), then one table"
-	@echo "  make regression/<point>    - one point, e.g. regression/intAdder/check"
-	@echo "  make regression-summary    - the table of the results in REG_DIR (default results/regression)"
-	@echo "  make check-fmt             - no RTL outside the allowlist names a precision (FMT_, EXP_W, MAN_W, EXPONENT_WIDTH, MANTISSA_WIDTH, is_int,"
-	@echo "                               is_fp32, from_fp32, widen()"
-	@echo "  make exhaustive FMT=<f>    - the unit sweeps of the restructure's gate table for one format (scripts/sweep.py, every core)"
-	@echo "  make equiv                 - each per-width integer unit against the generic unit it replaces (scripts/equiv.py, every core)"
-	@echo "  SIM ?= verilator (or vcs): the simulator of every point; under vcs the Verilator-only points are listed as N/A (README: Running with VCS)"
-	@echo "  FMT ?= fp32 (fp32, bf16 or int8) picks the define, +define+FMT_<F>; make regression runs every format's points whatever FMT is"
-	@echo "  Each unit's benches run alone as make <unit>-<target>, e.g. make intAdder-check; make fmt-help and make fp32Adder-help list more"
+	@echo "=== ArithmeticLibrary ==="
+	@echo "  FMT=fp32|bf16|int8 picks the number format (default fp32); OP=mul|add|cmp|relu narrows make verilator to one operation."
+	@echo ""
+	@echo "  make regression               - every unit's checks against the true function, one table"
+	@echo "  make regression/<point>       - one point, e.g. regression/intAdder/check (python3 regression.py --action points lists them)"
+	@echo "  make verilator [OP=op]        - the format wrappers' bench (TB_fmt) at FMT: every operation, or one"
+	@echo "  make vcs [OP=op]              - the same on Synopsys VCS; SIM=vcs runs make regression on VCS (README: Running with VCS)"
+	@echo "  make <unit>-verilator         - one unit's own bench (fp32Adder, fp32Multiplier and karatsuba also write a waveform: make <unit>-wave)"
+	@echo "  make lint                     - Verilator lint of every format's tops"
+	@echo "  make clean                    - remove the builds and logs"
 	@echo "  Units: $(UNITS)"
+
+# The format wrappers' bench at FMT: every TB_fmt point of that format, or those of one operation (OP).
+FMT_OP_POINTS = $(if $(OP),$(filter fmt-$(OP)_%,$(call of_fmt,$(FMT))),fmt-all_$(FMT))
+verilator:
+	@[ -n "$(FMT_OP_POINTS)" ] || { echo "make verilator: no TB_fmt point for FMT=$(FMT) OP=$(OP) (OP is mul, add, cmp or relu)"; exit 1; }
+	@$(MAKE) --no-print-directory $(FMT_OP_POINTS)
+
+vcs:
+	@$(MAKE) --no-print-directory verilator SIM=vcs
+
+lint:
+	@$(MAKE) --no-print-directory fmt-lint_tops
 
 # One point: runs in a private copy of the tree, writes $(REG_DIR)/<point>.log and .json.
 regression/%:
@@ -73,7 +85,7 @@ $(SF_LIB):
 clean:
 	rm -rf $(ROOT)/Verilator $(ROOT)/VCS $(ROOT)/results
 
-.PHONY: default help regression regression-summary check-fmt exhaustive equiv clean
+.PHONY: default help verilator vcs lint regression regression-summary check-fmt exhaustive equiv clean
 
 # ─────────────────────────────────────────────────────────────────────────────
 # common: the format package's define map per define, the fp32 units dumped for the Python model, the models fpu.py (narrow, widen) and
