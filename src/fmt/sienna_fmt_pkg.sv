@@ -47,6 +47,7 @@ package sienna_fmt_pkg;
   localparam int ADD_LATENCY = 1;  // fmt_add: int32Adder
   localparam int LANE_MUL_LATENCY = 1;  // lane multiply: GPNAE's int16Multiplier and int24Multiplier
   localparam int LANE_ADD_LATENCY = 0;  // no lane add in int8: fmt_add is int32Adder only
+  localparam int ACT_IN_LATENCY = 4;  // gpnae_act_in: LANE_MUL_LATENCY + 3: the rescale product, then round and saturate, classify, base
   localparam int HORNER_STEP_LATENCY = 3;  // one register, then GPNAE's fixedPointMultiplyAdd, 2 cycles
   localparam int HORNER_COEFFICIENT_LAG = 1;  // c_i is sampled one cycle after valid_i
   localparam int REQUANT_LATENCY = 4;  // int8Requantizer
@@ -117,6 +118,7 @@ package sienna_fmt_pkg;
   localparam int ADD_LATENCY = 5;  // fp32Adder
   localparam int LANE_MUL_LATENCY = 3;  // bf16Multiplier
   localparam int LANE_ADD_LATENCY = 5;  // bf16Adder
+  localparam int ACT_IN_LATENCY = 4;  // gpnae_act_in: LANE_MUL_LATENCY + 1, the class rides beside the operand multiply
   localparam int HORNER_STEP_LATENCY = 8;  // LANE_MUL_LATENCY + LANE_ADD_LATENCY
   localparam int HORNER_COEFFICIENT_LAG = 3;  // the add issues as the product lands
   localparam int REQUANT_LATENCY = 0;
@@ -147,6 +149,7 @@ package sienna_fmt_pkg;
   localparam int ADD_LATENCY = 5;
   localparam int LANE_MUL_LATENCY = 8;
   localparam int LANE_ADD_LATENCY = 5;
+  localparam int ACT_IN_LATENCY = 9;  // gpnae_act_in: LANE_MUL_LATENCY + 1, the class rides beside the operand multiply
   localparam int HORNER_STEP_LATENCY = 13;
   localparam int HORNER_COEFFICIENT_LAG = 8;
   localparam int REQUANT_LATENCY = 0;
