@@ -17,7 +17,7 @@ module TB_sienna_fmt_map;
 
 `ifdef FMT_INT8
   localparam string WANT_NAME = "int8";
-  localparam int WANT[15] = '{8, 32, 32, 32, 16, 1, 1, 1, 0, 4, 6, 0, 0, 1, 1};  // widths, latencies, the HAS_ flags
+  localparam int WANT[15] = '{8, 32, 32, 32, 16, 1, 1, 1, 0, 5, 6, 0, 0, 1, 1};  // widths, latencies, the HAS_ flags
   localparam int WANT_LOWEST = 32'h80, WANT_ONE = 1;
   localparam int WANT_BITS[5] = '{67, 54, 110, 83, 30};  // lane_params_t, requant_params_t, add_params_t, lane_entry_t, requant_scale_t
   localparam int WANT_KEEP = 1;  // DROPOUT_KEEP_SCALE, unused in int8

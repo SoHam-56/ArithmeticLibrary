@@ -1,6 +1,7 @@
 `timescale 1ns / 100ps
 
-// Affine int8 requantize: y = clamp(sat10(floor((acc * mult + 2^(shift - 1)) / 2^shift)) + zp, act_min, act_max), 4 stages.
+// Affine int8 requantize: y = clamp(sat10(floor((acc * mult + 2^(shift - 1)) / 2^shift)) + zp, act_min, act_max), 5 stages: the product
+// takes two (the mantissa's halves multiplied apart, then summed), since the whole 32 x 24 product in one cycle was the int8 build's worst path.
 module int8Requantizer (
     input  logic               clk_i,
     input  logic               rstn_i,
@@ -20,12 +21,16 @@ module int8Requantizer (
   localparam logic signed [9:0] SAT_MAX = 10'sd511;  // 10 bits hold every value an int8 zp and clamp can tell apart
   localparam logic signed [9:0] SAT_MIN = -10'sd512;
 
-  logic s1_v, s2_v, s3_v;
+  localparam int HALF_WIDTH = MANTISSA_WIDTH / 2;  // the mantissa's halves
+  localparam int PART_WIDTH = 32 + HALF_WIDTH + 1;  // acc * a half, signed
+
+  logic s1_v, s2_v, s2b_v, s3_v;
   logic signed [31:0] s1_acc;
   logic [MANTISSA_WIDTH-1:0] s1_mult;
-  logic [5:0] s1_shift, s2_shift;
-  logic signed [7:0] s1_zp, s1_lo, s1_hi, s2_zp, s2_lo, s2_hi, s3_zp, s3_lo, s3_hi;
-  logic [ROUNDED_WIDTH-1:0] s1_half, s2_half;  // 2^(shift - 1), 0 at shift 0
+  logic [5:0] s1_shift, s2_shift, s2b_shift;
+  logic signed [7:0] s1_zp, s1_lo, s1_hi, s2_zp, s2_lo, s2_hi, s2b_zp, s2b_lo, s2b_hi, s3_zp, s3_lo, s3_hi;
+  logic [ROUNDED_WIDTH-1:0] s1_half, s2_half, s2b_half;  // 2^(shift - 1), 0 at shift 0
+  logic signed [PART_WIDTH-1:0] s2_plo, s2_phi;  // acc times the mantissa's low and high halves
   logic signed [PRODUCT_WIDTH-1:0] s2_prod;
   logic signed [9:0] s3_r;  // the rounded, shifted product saturated to 10 bits
 
@@ -38,7 +43,8 @@ module int8Requantizer (
     end else begin
       s1_v   <= valid_i;
       s2_v   <= s1_v;
-      s3_v   <= s2_v;
+      s2b_v  <= s2_v;
+      s3_v   <= s2b_v;
       done_o <= s3_v;
     end
   end
@@ -55,10 +61,11 @@ module int8Requantizer (
       s1_hi    <= act_max_i;
     end
 
-  // Stage 2: the signed-by-unsigned product, exact in PRODUCT_WIDTH bits.
+  // Stage 2a: the signed accumulator times each unsigned half of the mantissa, exact in PART_WIDTH bits.
   always_ff @(posedge clk_i)
     if (s1_v) begin
-      s2_prod  <= $signed({{MANTISSA_WIDTH{s1_acc[31]}}, s1_acc}) * $signed({32'd0, s1_mult});
+      s2_plo   <= $signed({{(HALF_WIDTH + 1){s1_acc[31]}}, s1_acc}) * $signed({{33{1'b0}}, s1_mult[HALF_WIDTH-1:0]});
+      s2_phi   <= $signed({{(HALF_WIDTH + 1){s1_acc[31]}}, s1_acc}) * $signed({{33{1'b0}}, s1_mult[MANTISSA_WIDTH-1:HALF_WIDTH]});
       s2_shift <= s1_shift;
       s2_half  <= s1_half;
       s2_zp    <= s1_zp;
@@ -66,16 +73,27 @@ module int8Requantizer (
       s2_hi    <= s1_hi;
     end
 
-  // Stage 3: round half up (floor of the product plus half), arithmetic right shift, saturate to 10 bits.
+  // Stage 2b: the product, the high half's part shifted up: exact in PRODUCT_WIDTH bits.
   always_ff @(posedge clk_i)
     if (s2_v) begin
-      automatic logic signed [ROUNDED_WIDTH-1:0] r = ($signed({s2_prod[PRODUCT_WIDTH-1], s2_prod}) + $signed(s2_half)) >>> s2_shift;
+      s2_prod   <= (PRODUCT_WIDTH'(s2_phi) <<< HALF_WIDTH) + PRODUCT_WIDTH'(s2_plo);
+      s2b_shift <= s2_shift;
+      s2b_half  <= s2_half;
+      s2b_zp    <= s2_zp;
+      s2b_lo    <= s2_lo;
+      s2b_hi    <= s2_hi;
+    end
+
+  // Stage 3: round half up (floor of the product plus half), arithmetic right shift, saturate to 10 bits.
+  always_ff @(posedge clk_i)
+    if (s2b_v) begin
+      automatic logic signed [ROUNDED_WIDTH-1:0] r = ($signed({s2_prod[PRODUCT_WIDTH-1], s2_prod}) + $signed(s2b_half)) >>> s2b_shift;
       if (r > ROUNDED_WIDTH'(SAT_MAX)) s3_r <= SAT_MAX;
       else if (r < ROUNDED_WIDTH'(SAT_MIN)) s3_r <= SAT_MIN;
       else s3_r <= r[9:0];
-      s3_zp <= s2_zp;
-      s3_lo <= s2_lo;
-      s3_hi <= s2_hi;
+      s3_zp <= s2b_zp;
+      s3_lo <= s2b_lo;
+      s3_hi <= s2b_hi;
     end
 
   // Stage 4: + zp on 11 bits, then max with act_min and min with act_max.
