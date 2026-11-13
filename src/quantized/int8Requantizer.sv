@@ -38,6 +38,7 @@ module int8Requantizer (
     if (!rstn_i) begin
       s1_v   <= 1'b0;
       s2_v   <= 1'b0;
+      s2b_v  <= 1'b0;
       s3_v   <= 1'b0;
       done_o <= 1'b0;
     end else begin
