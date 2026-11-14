@@ -59,6 +59,7 @@ vcs:
 
 lint:
 	@$(MAKE) --no-print-directory fmt-lint_tops
+	@for f in FP32 BF16 INT8; do $(PYTHON) $(SCRIPTS)/declared_first.py --label "aril $$f" -D FMT_$$f -D SYNTHESIS $(FM_INC) $(FM_SRC) || exit 1; done
 
 # One point: runs in a private copy of the tree, writes $(REG_DIR)/<point>.log and .json.
 regression/%:
