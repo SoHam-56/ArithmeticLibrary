@@ -49,7 +49,7 @@ package sienna_fmt_pkg;
   localparam int LANE_ADD_LATENCY = 0;  // no lane add in int8: fmt_add is int32Adder only
   localparam int ACT_IN_LATENCY = 5;  // gpnae_act_in: LANE_MUL_LATENCY + 4: the rescale product, then round, saturate, classify, base
   localparam int HORNER_STEP_LATENCY = 3;  // one register, then GPNAE's fixedPointMultiplyAdd, 2 cycles
-  localparam int HORNER_COEFFICIENT_LAG = 1;  // c_i is sampled one cycle after valid_i
+  localparam int HORNER_COEFFICIENT_LAG = 2;  // c_i is sampled two cycles after valid_i, in fixedPointMultiplyAdd's add stage
   localparam int REQUANT_LATENCY = 5;  // int8Requantizer: the product over two stages
   localparam int QUANT_ADD_LATENCY = 6;  // int8QuantizedAdder
   localparam int DROPOUT_SCALE_LATENCY = 0;  // dropout keeps x: the 1/keep factor is in the next layer's scale

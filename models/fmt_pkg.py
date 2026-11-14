@@ -185,7 +185,7 @@ def cflags(fmt, kind, data_width=None, ext_data_width=None):
 SPEC = {  # sienna-restructure "The format package and the define": fp32, bf16, int8
     "DATA_WIDTH": (32, 16, 8), "ACC_DATA_WIDTH": (32, 32, 32), "RESULT_DATA_WIDTH": (32, 16, 32), "BIAS_DATA_WIDTH": (32, 16, 32), "ACTIVATION_DATA_WIDTH": (32, 16, 16),
     "MUL_LATENCY": (8, 3, 1), "ADD_LATENCY": (5, 5, 1), "LANE_MUL_LATENCY": (8, 3, 1), "LANE_ADD_LATENCY": (5, 5, 0),
-    "HORNER_STEP_LATENCY": (13, 8, 3), "HORNER_COEFFICIENT_LAG": (8, 3, 1), "REQUANT_LATENCY": (0, 0, 5), "QUANT_ADD_LATENCY": (0, 0, 6), "DROPOUT_SCALE_LATENCY": (8, 3, 0),
+    "HORNER_STEP_LATENCY": (13, 8, 3), "HORNER_COEFFICIENT_LAG": (8, 3, 2), "REQUANT_LATENCY": (0, 0, 5), "QUANT_ADD_LATENCY": (0, 0, 6), "DROPOUT_SCALE_LATENCY": (8, 3, 0),
     "LOWEST_VALUE": (0xFF800000, 0xFF80, 0x80), "ONE_VALUE": (0x3F800000, 0x3F80, 1), "HAS_FLOAT_TAIL": (0, 1, 0), "HAS_REQUANT_EPILOGUE": (0, 0, 1),
     "HAS_RESIDUAL_ADD": (0, 0, 1), "EXPONENT_WIDTH": (8, 8, 0), "MANTISSA_WIDTH": (23, 7, 7),
 }

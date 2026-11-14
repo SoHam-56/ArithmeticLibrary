@@ -21,7 +21,7 @@ module TB_sienna_fmt_map;
   localparam int WANT_LOWEST = 32'h80, WANT_ONE = 1;
   localparam int WANT_BITS[5] = '{67, 54, 110, 83, 30};  // lane_params_t, requant_params_t, add_params_t, lane_entry_t, requant_scale_t
   localparam int WANT_KEEP = 1;  // DROPOUT_KEEP_SCALE, unused in int8
-  localparam int WANT_LANE[4] = '{0, 7, 3, 1};  // EXPONENT_WIDTH, MANTISSA_WIDTH, HORNER_STEP_LATENCY, HORNER_COEFFICIENT_LAG
+  localparam int WANT_LANE[4] = '{0, 7, 3, 2};  // EXPONENT_WIDTH, MANTISSA_WIDTH, HORNER_STEP_LATENCY, HORNER_COEFFICIENT_LAG
 `elsif FMT_BF16
   localparam string WANT_NAME = "bf16";
   localparam int WANT[15] = '{16, 32, 16, 16, 16, 3, 5, 3, 5, 0, 0, 3, 1, 0, 0};
