@@ -3,7 +3,7 @@
 IEEE 1800 requires and as VCS (Error-[IND]) and Design Compiler (VER-954, VER-956) enforce; Verilator accepts the other order, so its
 lint cannot catch it. Prints one line, 'declared-first <label>: N errors', every slang error above it, and exits 1 on any error.
 
-  declared_first.py --label "mesh int8" --top SystolicMesh -D FMT_INT8 -D SYNTHESIS [-I dir] [-f list.f] file.sv ...
+  declared_first.py --label "mesh int8" --top SystolicMesh -D FMT_INT8 -D SYNTHESIS [-G MODE=1] [--timescale 1ns/1ps] [-I dir] [-f list.f] file.sv ...
 
 A -f list takes Verilator/VCS file-list syntax: one path per line, relative to the list's directory (or --root), +incdir+ lines, // comments.
 Without pyslang the check prints 'SKIPPED' and exits 0, so a tree without it still lints; the regression points count the line.
@@ -36,6 +36,8 @@ def main():
     ap.add_argument("--top", action="append", default=[])
     ap.add_argument("-D", dest="defines", action="append", default=[])
     ap.add_argument("-I", dest="incdirs", action="append", default=[])
+    ap.add_argument("-G", dest="params", action="append", default=[], help="a top-level parameter override, NAME=VALUE (a testbench's MODE)")
+    ap.add_argument("--timescale", default=None, help="the time scale of files without one (a testbench package), e.g. 1ns/1ps; RTL is checked without it")
     ap.add_argument("-f", dest="lists", action="append", default=[])
     ap.add_argument("--root", default=None, help="the directory a -f list's paths are relative to (default: the list's own)")
     ap.add_argument("files", nargs="*")
@@ -51,7 +53,7 @@ def main():
         f, i = read_list(l, a.root)
         files += f
         incs += i
-    args = ["slang", "--allow-toplevel-iface-ports"] + [f"--top={t}" for t in a.top] + [f"-D{d}" for d in a.defines] + [f"-I{i}" for i in incs] + files
+    args = ["slang", "--allow-toplevel-iface-ports"] + [f"--top={t}" for t in a.top] + [f"-D{d}" for d in a.defines] + [f"-G{g}" for g in a.params] + ([f"--timescale={a.timescale}"] if a.timescale else []) + [f"-I{i}" for i in incs] + files
     d = Driver()
     d.addStandardArgs()
     if not d.parseCommandLine(shlex.join(args)) or not d.processOptions() or not d.parseAllSources():
