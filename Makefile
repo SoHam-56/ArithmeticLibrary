@@ -195,6 +195,42 @@ $(CREDIT_RUNS): common-credit_run_%:
 	    || { echo "credit FAIL: STAGES=$$s MODE=$$m: $$res PASSED lines, fired:$$msg"; tail -20 $$d.run.log; exit 1; }; \
 	fi
 
+# Memory array: lint of both read kinds, TB_mem_array modes 0-2 against its model, mode 3's $fatal (a mask that does not divide the row).
+MEM_SRC  = $(SRC)/mem/mem_array.sv
+MEM_RUNS = $(addprefix common-mem_run_,0 1 2)
+MEM_BUILD = $(if $(filter vcs,$(SIM)),$(call vcs_build,TB_mem_array,$$d,$(MEM_SRC) $(TBU)/TB_mem_array.sv,$(1)),verilator $(CM_FLAGS) --top-module TB_mem_array $(2) --Mdir $$d $(MEM_SRC) $(TBU)/TB_mem_array.sv -o sim)
+
+common-mem: common-mem_lint $(MEM_RUNS) common-mem_fatal
+	@echo "mem OK: 4 of 4 checks passed"
+
+common-mem_lint:
+ifeq ($(SIM),vcs)
+	@echo "mem lint: not applicable to VCS (verilator --lint-only -Wall; VCS's +lint=all is the lint points' job)"
+else
+	@w=0; e=0; for cfg in "" "-GSYNC_READ=0 -GNW=3 -GNR=4 -GMASK_W=8"; do \
+	  verilator --lint-only -Wall -DSYNTHESIS --top-module mem_array $$cfg $(MEM_SRC) > $(ROOT)/Verilator/common/mem_lint.log 2>&1; \
+	  w=$$((w + $$(command grep -c '^%Warning' $(ROOT)/Verilator/common/mem_lint.log))); \
+	  e=$$((e + $$(command grep -c '^%Error' $(ROOT)/Verilator/common/mem_lint.log))); \
+	done; \
+	echo "mem lint: $$w warnings, $$e errors"; \
+	[ $$w -eq 0 ] && [ $$e -eq 0 ] || { cat $(ROOT)/Verilator/common/mem_lint.log; exit 1; }
+endif
+
+$(MEM_RUNS): common-mem_run_%:
+	@m=$*; d=$(CM_V)/mem_m$$m; rm -rf $$d; mkdir -p $(CM_V); \
+	$(call MEM_BUILD,-pvalue+TB_mem_array.MODE=$$m,-GMODE=$$m) > $$d.build.log 2>&1 \
+	  || { echo "mem FAIL: MODE=$$m: BUILD FAILED"; tail -20 $$d.build.log; exit 1; }; \
+	$$d/sim $(if $(filter vcs,$(SIM)),$(VCS_RUN)) > $$d.run.log 2>&1; \
+	line=$$(command grep -m1 "^MEM_ARRAY MODE=$$m:" $$d.run.log); \
+	[ $$(command grep -c "^RESULT: PASSED" $$d.run.log) -eq 1 ] && echo "mem run: $$line" || { echo "mem FAIL: MODE=$$m: $$line"; tail -20 $$d.run.log; exit 1; }
+
+common-mem_fatal:
+	@d=$(CM_V)/mem_fatal; rm -rf $$d; mkdir -p $(CM_V); want="mem_array: MASK_W 7 must divide WIDTH 32"; \
+	if $(call MEM_BUILD,-pvalue+TB_mem_array.MODE=3,-GMODE=3) > $$d.build.log 2>&1; then \
+	  $$d/sim $(if $(filter vcs,$(SIM)),$(VCS_RUN)) > $$d.run.log 2>&1; log=$$d.run.log; else log=$$d.build.log; fi; \
+	line=$$(command grep -m1 -F "$$want" $$log); \
+	[ -n "$$line" ] && echo "mem fatal: fired: $$line" || { echo "mem FAIL: MODE=3: no '$$want'"; tail -20 $$log; exit 1; }
+
 # expected $fatal per mode: 6 and 7 stop the build (elaboration), 8 stops the simulation at time 0
 CREDIT_FATAL_6 = credit_counter: CRW
 CREDIT_FATAL_7 = credit_counter: MAX 0 must be at least 1
@@ -208,7 +244,7 @@ $(CREDIT_FATALS): common-credit_fatal_%:
 	[ -n "$$line" ] && echo "credit OK: MODE=$$m fired: $$line" || { echo "credit FAIL: MODE=$$m: no '$$want'"; tail -20 $$log; exit 1; }
 
 .PHONY: common-pkg_fp32 common-pkg_bf16 common-pkg_int8 common-pkg_mutant common-dump32 common-ipu common-fpu common-truth common-credit \
-        common-credit_lint $(CREDIT_RUNS) $(CREDIT_FATALS)
+        common-credit_lint $(CREDIT_RUNS) $(CREDIT_FATALS) common-mem common-mem_lint $(MEM_RUNS) common-mem_fatal
 
 # ─────────────────────────────────────────────────────────────────────────────
 # The per-format units' direct reference benches: <unit>-verilator (its bench against its C reference through DPI), <unit>-vcs (the same bench

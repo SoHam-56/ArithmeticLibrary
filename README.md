@@ -1,6 +1,6 @@
 # ArithmeticLibrary
 
-Arithmetic units in SystemVerilog (fp32, bf16 and int8 adders and multipliers, the int8 requantizer and quantized adder, the fp32-to-bf16 narrower, credit links), each with a bench against a reference (SoftFloat, a C model through DPI, or the Python models in `models/`).
+Arithmetic units in SystemVerilog (fp32, bf16 and int8 adders and multipliers, the int8 requantizer and quantized adder, the fp32-to-bf16 narrower, credit links, the memory array), each with a bench against a reference (SoftFloat, a C model through DPI, or the Python models in `models/`).
 
 The two int8 units take real scales encoded by the host (`ipu.encode_scale`, `ipu.encode_add`), so they work for any scale within the encoder's domain (the adder refuses input-to-output scale ratios of 2^23 or more), not one framework's arithmetic:
 
@@ -49,6 +49,8 @@ A design uses the two format wrappers rather than the units directly, so the bui
 
 `credit_link_if` (`src/credit/`) is the stream interface the SIENNA designs use: the receiver grants one credit per free slot on `credit`, and the sender asserts `put` with `data` only while it holds one.
 
+`mem_array` (`src/mem/`) is the memory array every SIENNA design keeps its banks in: `DEPTH` rows of `WIDTH` bits, `NW` write ports (a row each, under a mask of `WIDTH / MASK_W` units, the higher port winning a collision), `NR` read ports (a row each, registered one cycle after an enabled read with `SYNC_READ` 1, combinational with 0). It is one module boundary per array, so synthesis can replace it by name with a memory macro or an ideal stub while simulation keeps the flop array; nothing in it is reset. `make common-mem` runs its bench (`TB_mem_array`, three port shapes against a model, plus its `$fatal`).
+
 ## Regression
 
 ```bash
@@ -62,7 +64,7 @@ make clean                          # remove the builds and logs
 
 Each point runs in a private copy of the working tree (git's files, ignored outputs left out) and passes only on its own verdict (the bench's `RESULT: PASSED`, the model check's 0 mismatches, each lint's count line with 0 errors), never on a clean exit alone. The regression fails if any point fails or did not run. `make help` lists the units.
 
-The layout: `src/` holds the RTL by function (`adders`, `multipliers`, `converters`, `dividers`, `quantized`, `fmt`, `credit`), `testbenches/top/` the format bench `TB_fmt` and its harnesses, `testbenches/units/` every unit bench with its DPI references and SoftFloat, `models/` the Python models and `scripts/` the shell, make and Python helpers.
+The layout: `src/` holds the RTL by function (`adders`, `multipliers`, `converters`, `dividers`, `quantized`, `fmt`, `credit`, `mem`), `testbenches/top/` the format bench `TB_fmt` and its harnesses, `testbenches/units/` every unit bench with its DPI references and SoftFloat, `models/` the Python models and `scripts/` the shell, make and Python helpers.
 
 `scripts/regress.py` is the regression engine every repo that holds this library uses for its own `make regression`.
 
