@@ -12,7 +12,7 @@ relu_float_signed|fp32|relu|pkg|s/  return x\[DATA_WIDTH-1\] ? '0 : x;/  return 
 mul_fp32_is_add|fp32|mul|src/fmt_mul.sv|s/    fp32Multiplier MUL (/    fp32Adder MUL (/||y
 mul_int8_is_int16|int8|mul|src/fmt_mul.sv|s/    int8Multiplier MUL (/    int16Multiplier MUL (/|8 32|y
 add_lane_bf16_is_mul|bf16|add|src/fmt_add.sv|s/    bf16Adder ADD (/    bf16Multiplier ADD (/|16|y
-add_lane_lat_bf16|bf16|add|pkg|s/localparam int LANE_ADD_LATENCY = 5;  \/\/ bf16Adder/localparam int LANE_ADD_LATENCY = 4;/|16|n
+add_lane_lat_bf16|bf16|add|pkg|s/localparam int LANE_ADD_LATENCY = 6;  \/\/ bf16Adder: the result mux on its own stage/localparam int LANE_ADD_LATENCY = 5;/|16|n
 mul_mesh_lat_int8|int8|mul|pkg|s/localparam int MUL_LATENCY = 2;  \/\/ mesh product/localparam int MUL_LATENCY = 3;  \/\/ mesh product/|8 32|n
 requantize_shift_plus_one|int8|requantize|tops|s/.shift_i(params_i.shift),/.shift_i(params_i.shift + 6'd1),/||s
 requantize_zero_point_ignored|int8|requantize|tops|s/.zp_i(params_i.zero_point)/.zp_i(8'sd0)/||s
@@ -20,4 +20,4 @@ quantized_add_in1_zero_point_ignored|int8|quantized_add|tops|s/.zp1_i(params_i.i
 quantized_add_in2_mantissa_dropped|int8|quantized_add|tops|s/.m2_i(params_i.in2_mantissa)/.m2_i(32'd0)/||s
 narrow_truncates|bf16|narrow|tops|s/fp32ToBf16 NARROW (.fp32_i(x_i), .bf16_o(y_o));/assign y_o = x_i[31:16];/||s
 bf16_multiplier_one_ulp_low|bf16|mul|unit:src/multipliers/bf16Multiplier.sv|s/        end else result_o <= {class_at_product.sign, result_exponent, result_mantissa};/        end else result_o <= {class_at_product.sign, result_exponent, result_mantissa} - DATA_WIDTH'(result_mantissa != '0);/|16 16|s
-bf16_adder_one_ulp_low|bf16|add|unit:src/adders/bf16Adder.sv|s/        else result_o <= {s4_class.sign, normalized_exponent\[EXPONENT_WIDTH-1:0\], normalized_mantissa\[ALIGNED_WIDTH-2-:MANTISSA_WIDTH\]};/        else result_o <= {s4_class.sign, normalized_exponent[EXPONENT_WIDTH-1:0], normalized_mantissa[ALIGNED_WIDTH-2-:MANTISSA_WIDTH]} - DATA_WIDTH'(normalized_mantissa[ALIGNED_WIDTH-2-:MANTISSA_WIDTH] != '0);/|16|s
+bf16_adder_one_ulp_low|bf16|add|unit:src/adders/bf16Adder.sv|s/        else result_o <= {s5_class.sign, s5_exponent\[EXPONENT_WIDTH-1:0\], s5_mantissa\[ALIGNED_WIDTH-2-:MANTISSA_WIDTH\]};/        else result_o <= {s5_class.sign, s5_exponent[EXPONENT_WIDTH-1:0], s5_mantissa[ALIGNED_WIDTH-2-:MANTISSA_WIDTH]} - DATA_WIDTH'(s5_mantissa[ALIGNED_WIDTH-2-:MANTISSA_WIDTH] != '0);/|16|s
