@@ -25,14 +25,7 @@ module fp32Adder (
     logic       op_sub;
   } meta_t;
 
-  // =========================================================================
-  // STAGE 1: Unpack, Detect Specials, Align
-  // =========================================================================
-  logic       s1_valid;
-  logic [7:0] s1_diff;
-  logic [23:0] s1_man_big, s1_man_small;
-  meta_t s1_meta;
-
+  // Stage 1: the unpacked operands, their classes, the magnitude order.
   logic sa, sb;
   logic [7:0] ea, eb;
   logic [22:0] ma_raw, mb_raw;
@@ -42,7 +35,33 @@ module fp32Adder (
   logic a_snan, b_snan;  // New signals for SNaN detection
   logic op_sub_wire;
   logic comp_a_ge_b;
+  logic       s1_valid;
+  logic [7:0] s1_diff;
+  logic [23:0] s1_man_big, s1_man_small;
+  meta_t s1_meta;
+  // Stage 2: the aligned significands.
+  logic         s2_valid;
+  logic  [26:0] s2_man_big;
+  logic  [26:0] s2_man_small;
+  meta_t        s2_meta;
+  // Stage 3: the sum.
+  logic         s3_valid;
+  logic  [27:0] s3_sum;
+  meta_t        s3_meta;
+  // Stage 4: the sum and its leading zeros.
+  logic         s4_valid;
+  logic  [27:0] s4_sum;
+  logic  [ 4:0] s4_lzc;
+  meta_t        s4_meta;
+  logic  [ 4:0] lzc_module_out;
+  // Stage 5: the normalized mantissa and exponent.
+  logic [27:0] norm_man;
+  logic [ 8:0] norm_exp;
+  logic [ 4:0] shift_amt;
 
+  // =========================================================================
+  // STAGE 1: Unpack, Detect Specials, Align
+  // =========================================================================
   always_comb begin
     // Unpack Raw
     {sa, ea, ma_raw} = A;
@@ -92,7 +111,7 @@ module fp32Adder (
     end else begin
       s1_valid <= valid_i;
       if (valid_i) begin
-        // 1. Invalid Operation: 
+        // 1. Invalid Operation:
         //    Case A: Inf - Inf
         //    Case B: Any Signaling NaN Input
         s1_meta.is_invalid_op <= ((a_inf && b_inf) && (sa != sb)) || (a_snan || b_snan);
@@ -127,11 +146,6 @@ module fp32Adder (
   // =========================================================================
   // STAGE 2: Align Shift
   // =========================================================================
-  logic         s2_valid;
-  logic  [26:0] s2_man_big;
-  logic  [26:0] s2_man_small;
-  meta_t        s2_meta;
-
   always_ff @(posedge clk_i) begin
     s2_valid <= s1_valid;
     if (s1_valid) begin
@@ -150,10 +164,6 @@ module fp32Adder (
   // =========================================================================
   // STAGE 3: Add/Sub
   // =========================================================================
-  logic         s3_valid;
-  logic  [27:0] s3_sum;
-  meta_t        s3_meta;
-
   always_ff @(posedge clk_i) begin
     s3_valid <= s2_valid;
     if (s2_valid) begin
@@ -166,13 +176,6 @@ module fp32Adder (
   // =========================================================================
   // STAGE 4: Normalize & Output
   // =========================================================================
-  logic         s4_valid;
-  logic  [27:0] s4_sum;
-  logic  [ 4:0] s4_lzc;
-  meta_t        s4_meta;
-
-  logic  [ 4:0] lzc_module_out;
-
   cntlz28 u_lzc (
       .i(s3_sum),
       .o(lzc_module_out)
@@ -187,10 +190,6 @@ module fp32Adder (
       if (s3_sum == 0) s4_meta.is_zero <= 1'b1;
     end
   end
-
-  logic [27:0] norm_man;
-  logic [ 8:0] norm_exp;
-  logic [ 4:0] shift_amt;
 
   always_comb begin
     norm_man  = s4_sum;

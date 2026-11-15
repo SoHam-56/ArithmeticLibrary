@@ -25,14 +25,14 @@ module mem_array #(
     input  logic [NR-1:0][   AW-1:0] raddr_i,
     output logic [NR-1:0][WIDTH-1:0] rdata_o
 );
+  logic [WIDTH-1:0] mem[DEPTH];
+
   if (WIDTH % MASK_W != 0 || MASK_W < 1) begin : G_BAD_MASK
     $fatal(1, "mem_array: MASK_W %0d must divide WIDTH %0d", MASK_W, WIDTH);
   end
   if (DEPTH < 1 || NW < 1 || NR < 1) begin : G_BAD_SHAPE
     $fatal(1, "mem_array: DEPTH %0d, NW %0d and NR %0d must be at least 1", DEPTH, NW, NR);
   end
-
-  logic [WIDTH-1:0] mem[DEPTH];
 
   always_ff @(posedge clk_i)
     for (int p = 0; p < NW; p++)

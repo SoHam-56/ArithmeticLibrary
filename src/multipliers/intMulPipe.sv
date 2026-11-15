@@ -35,23 +35,6 @@ module intMulPipe #(
   localparam int L1 = (STAGES == 3) ? (LEVELS + 1) / 2 : LEVELS;  // levels before the first register
   localparam int MID = rows_after(ROWS, L1);  // rows registered there (2 at STAGES 2)
 
-  if (STAGES != 2 && STAGES != 3) begin : G_BAD_STAGES
-    $fatal(1, "intMulPipe: STAGES %0d, 2 or 3", STAGES);
-  end
-  if (AW < 2 || BW < 2) begin : G_BAD_WIDTH
-    $fatal(1, "intMulPipe: AW %0d and BW %0d must be at least 2", AW, BW);
-  end
-
-  // The rows: b_i[j] times a_i at weight 2^j, a_i sign-extended to W bits; the sign row is subtracted (its ones' complement here, plus one
-  // in the final add), so two's-complement operands multiply exactly.
-  logic [W-1:0] row[ROWS];
-  logic [W-1:0] ax;
-  assign ax = W'(a_i);
-  always_comb begin
-    for (int j = 0; j < ROWS - 1; j++) row[j] = b_i[j] ? (ax << j) : '0;
-    row[ROWS-1] = b_i[ROWS-1] ? ~(ax << (ROWS - 1)) : '0;
-  end
-
   // One carry-save level: every three rows become a sum row and a carry row, the rest pass. The level's row counts are constants.
   function automatic void csa_level(input int n, input logic [W-1:0] r[ROWS], output logic [W-1:0] t[ROWS]);
     for (int i = 0; i < ROWS; i++) t[i] = '0;
@@ -62,8 +45,33 @@ module intMulPipe #(
     for (int g = 3 * (n / 3); g < n; g++) t[2 * (n / 3) + g - 3 * (n / 3)] = r[g];
   endfunction
 
-  // Stage 1: L1 levels of the tree.
+  // The rows: b_i[j] times a_i at weight 2^j, a_i sign-extended to W bits; the sign row is subtracted (its ones' complement here, plus one
+  // in the final add), so two's-complement operands multiply exactly.
+  logic [W-1:0] ax;
+  logic [W-1:0] row[ROWS];
+  // Stage 1: the tree's first L1 levels, registered (MID rows), and the sign row's extra one.
   logic [W-1:0] s1_c[ROWS];
+  logic [W-1:0] s1_q[MID];
+  logic         s1_neg;
+  // The valid chain, and the two rows that reach the add with their extra one.
+  logic [STAGES-1:0] v;
+  logic [W-1:0] fs, fc;
+  logic         fneg;
+
+  if (STAGES != 2 && STAGES != 3) begin : G_BAD_STAGES
+    $fatal(1, "intMulPipe: STAGES %0d, 2 or 3", STAGES);
+  end
+  if (AW < 2 || BW < 2) begin : G_BAD_WIDTH
+    $fatal(1, "intMulPipe: AW %0d and BW %0d must be at least 2", AW, BW);
+  end
+
+  assign ax = W'(a_i);
+  always_comb begin
+    for (int j = 0; j < ROWS - 1; j++) row[j] = b_i[j] ? (ax << j) : '0;
+    row[ROWS-1] = b_i[ROWS-1] ? ~(ax << (ROWS - 1)) : '0;
+  end
+
+  // Stage 1: L1 levels of the tree.
   always_comb begin
     automatic logic [W-1:0] r[ROWS];
     automatic logic [W-1:0] t[ROWS];
@@ -75,23 +83,17 @@ module intMulPipe #(
     for (int i = 0; i < ROWS; i++) s1_c[i] = (i < MID) ? r[i] : '0;
   end
 
-  logic [STAGES-1:0] v;
   always_ff @(posedge clk_i or negedge rstn_i)
     if (!rstn_i) v <= '0;
     else v <= {v[STAGES-2:0], valid_i};
   assign done_o = v[STAGES-1];
 
-  logic [W-1:0] s1_q[MID];
-  logic         s1_neg;  // the sign row was taken: add one
   always_ff @(posedge clk_i)
     if (valid_i) begin
       for (int i = 0; i < MID; i++) s1_q[i] <= s1_c[i];
       s1_neg <= b_i[ROWS-1];
     end
 
-  // The two rows that reach the add, and their extra one.
-  logic [W-1:0] fs, fc;
-  logic         fneg;
   if (STAGES == 2) begin : G_TWO
     assign fs   = s1_q[0];
     assign fc   = s1_q[1];
@@ -99,6 +101,8 @@ module intMulPipe #(
   end else begin : G_THREE
     // Stage 2: the remaining levels, from MID rows to two.
     logic [W-1:0] s2_c[ROWS];
+    logic [W-1:0] s2_q[2];
+    logic         s2_neg;
     always_comb begin
       automatic logic [W-1:0] r[ROWS];
       automatic logic [W-1:0] t[ROWS];
@@ -109,8 +113,6 @@ module intMulPipe #(
       end
       for (int i = 0; i < ROWS; i++) s2_c[i] = (i < 2) ? r[i] : '0;
     end
-    logic [W-1:0] s2_q[2];
-    logic         s2_neg;
     always_ff @(posedge clk_i)
       if (v[0]) begin
         s2_q[0] <= s2_c[0];

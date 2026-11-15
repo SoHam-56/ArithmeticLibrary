@@ -37,6 +37,9 @@ module int8Requantizer (
   logic signed [PRODUCT_WIDTH:0] s2_wide;  // the product with one more sign bit
   logic signed [PRODUCT_WIDTH-1:0] s2_prod;
   logic signed [9:0] s3_r;  // the rounded, shifted product saturated to 10 bits
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic unused_wide;  // the product's extra sign bit
+  /* verilator lint_on UNUSEDSIGNAL */
 
   always_ff @(posedge clk_i or negedge rstn_i) begin
     if (!rstn_i) begin
@@ -120,8 +123,5 @@ module int8Requantizer (
   a_shift_range: assert property (@(posedge clk_i) disable iff (!rstn_i) s1_v |-> !s1_bad)
     else $error("int8Requantizer: shift %0d above %0d", s1_bad_shift, MAX_SHIFT);
 `endif
-  /* verilator lint_off UNUSEDSIGNAL */
-  logic unused_wide;
   assign unused_wide = s2_wide[PRODUCT_WIDTH];
-  /* verilator lint_on UNUSEDSIGNAL */
 endmodule

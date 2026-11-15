@@ -13,11 +13,20 @@ module karatsubaSigned #(
     output logic signed [(2*WIDTH)-1:0] product_o  // Signed Output
 );
 
-  // Calculate Absolute Values (1 cycle latency)
+  localparam CORE_LATENCY = 6;  // karatsubaUnsigned's cycles, the sign's delay
+
+  // Stage 1: the absolute values and the signs.
   logic signed [WIDTH-1:0] abs_a, abs_b;
   logic sign_a, sign_b;
   logic valid_s1;
+  // The unsigned core's product and valid.
+  logic unsigned_valid_o;
+  logic [(2*WIDTH)-1:0] unsigned_product;
+  // The sign, delayed to the core's latency.
+  logic [CORE_LATENCY-1:0] sign_delay_line;
+  logic final_sign_bit;
 
+  // Calculate Absolute Values (1 cycle latency)
   always_ff @(posedge clk_i or negedge rstn_i) begin
     if (!rstn_i) begin
       abs_a <= '0;
@@ -29,7 +38,7 @@ module karatsubaSigned #(
       valid_s1 <= valid_i;
 
       // If input is negative, invert it; otherwise keep it.
-      // Note: We handle the edge case of Min_Int slightly imperfectly here 
+      // Note: We handle the edge case of Min_Int slightly imperfectly here
       sign_a <= a_i[WIDTH-1];
       sign_b <= b_i[WIDTH-1];
 
@@ -37,9 +46,6 @@ module karatsubaSigned #(
       abs_b <= (b_i[WIDTH-1]) ? -b_i : b_i;
     end
   end
-
-  logic unsigned_valid_o;
-  logic [(2*WIDTH)-1:0] unsigned_product;
 
   karatsubaUnsigned #(WIDTH) u_core (
       .clk_i(clk_i),
@@ -52,9 +58,6 @@ module karatsubaSigned #(
   );
 
   // Delay the Sign Bit to match Core Latency
-  localparam CORE_LATENCY = 6;
-  logic [CORE_LATENCY-1:0] sign_delay_line;
-
   always_ff @(posedge clk_i or negedge rstn_i) begin
     if (!rstn_i) begin
       sign_delay_line <= '0;
@@ -63,8 +66,6 @@ module karatsubaSigned #(
       sign_delay_line <= {sign_delay_line[CORE_LATENCY-2:0], (sign_a ^ sign_b)};
     end
   end
-
-  logic final_sign_bit;
   assign final_sign_bit = sign_delay_line[CORE_LATENCY-1];
 
   // 4. Final Output Adjustment

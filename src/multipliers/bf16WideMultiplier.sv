@@ -26,15 +26,23 @@ module bf16WideMultiplier #(
   localparam int EXPONENT_BIAS = (1 << (EXPONENT_WIDTH - 1)) - 1;
   localparam logic [EXPONENT_WIDTH-1:0] EXPONENT_ALL_ONES = '1;
 
+  // Stage 1: the classes, the product's fp32-biased exponent before normalization, the significands.
+  logic s1_valid, s1_sign, s1_nan, s1_inf, s1_zero, s1_invalid;
+  logic signed [11:0] s1_exp;
+  logic [SIGNIFICAND_WIDTH-1:0] s1_significand_a, s1_significand_b;
+  // Stage 2: the significand product.
+  logic s2_valid, s2_sign, s2_nan, s2_inf, s2_zero, s2_invalid;
+  logic signed [11:0] s2_exp;
+  logic [PRODUCT_WIDTH-1:0] s2_significand_product;
+  // Stage 3: the normalized exponent and mantissa.
+  logic signed [11:0] normalized_exponent;
+  logic [22:0] normalized_mantissa;
+
 `ifndef SYNTHESIS  // parameter checks; synthesis tools ignore or reject initial blocks
   initial if (PRODUCT_WIDTH > 22 || EXPONENT_WIDTH > 8) $error("bf16WideMultiplier: EXPONENT_WIDTH=%0d MANTISSA_WIDTH=%0d does not fit an exact fp32 product", EXPONENT_WIDTH, MANTISSA_WIDTH);
 `endif
 
   // ── Stage 1: classify the inputs and add the exponents, rebased to fp32's bias ──
-  logic s1_valid, s1_sign, s1_nan, s1_inf, s1_zero, s1_invalid;
-  logic signed [11:0] s1_exp;  // fp32-biased exponent of the product before normalization
-  logic [SIGNIFICAND_WIDTH-1:0] s1_significand_a, s1_significand_b;
-
   always_ff @(posedge clk_i or negedge rstn_i) begin
     if (!rstn_i) s1_valid <= 1'b0;
     else s1_valid <= valid_i;
@@ -60,10 +68,6 @@ module bf16WideMultiplier #(
   end
 
   // ── Stage 2: significand product ──
-  logic s2_valid, s2_sign, s2_nan, s2_inf, s2_zero, s2_invalid;
-  logic signed [11:0] s2_exp;
-  logic [PRODUCT_WIDTH-1:0] s2_significand_product;
-
   always_ff @(posedge clk_i or negedge rstn_i) begin
     if (!rstn_i) s2_valid <= 1'b0;
     else s2_valid <= s1_valid;
@@ -78,8 +82,6 @@ module bf16WideMultiplier #(
   end
 
   // ── Stage 3: normalize (product in [1, 4)), place in fp32, handle range ──
-  logic signed [11:0] normalized_exponent;
-  logic [22:0] normalized_mantissa;
   always_comb begin
     normalized_exponent = s2_exp + (s2_significand_product[PRODUCT_WIDTH-1] ? 12'sd1 : 12'sd0);
     normalized_mantissa = s2_significand_product[PRODUCT_WIDTH-1] ? 23'({s2_significand_product[PRODUCT_WIDTH-2:0], {(24 - PRODUCT_WIDTH){1'b0}}}) : 23'({s2_significand_product[PRODUCT_WIDTH-3:0], {(25 - PRODUCT_WIDTH){1'b0}}});

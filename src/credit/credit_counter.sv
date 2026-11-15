@@ -10,12 +10,13 @@ module credit_counter #(parameter int MAX = 32, parameter int CRW = 1) (
     output logic [$clog2(MAX + 1)-1:0] count_o
 );
   localparam int CW = $clog2(MAX + 1);
+  logic [CW-1:0] cnt;
+
   if (MAX < 1) begin : G_BAD_MAX  // a counter that can never hold a credit
     $fatal(1, "credit_counter: MAX %0d must be at least 1", MAX);
   end else if (CRW > CW) begin : G_BAD_CRW  // the credit's high bits would be dropped silently
     $fatal(1, "credit_counter: CRW %0d is wider than the count's %0d bits (MAX %0d)", CRW, CW, MAX);
   end
-  logic [CW-1:0] cnt;
   always_ff @(posedge clk_i or negedge rstn_i)
     if (!rstn_i) cnt <= '0;
     else cnt <= cnt + CW'(credit_i) - CW'(put_i);

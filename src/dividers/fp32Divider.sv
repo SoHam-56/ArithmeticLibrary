@@ -9,24 +9,33 @@ module fp32Divider (
     output wire [31:0] Result,
     output wire        done_o    // Done signal
 );
+  localparam bias = 7'b1111111;  // 127
+  localparam shiftStages = 24;  // Adjusted for 24-bit division
+
+  // Stage 1: the unpacked operands.
   reg [23:0] A_Mantissa, B_Mantissa;
   reg [7:0] A_Exponent, B_Exponent;
-
   reg sign, sign_A, sign_B;
-  reg [7:0] Temp_Exponent;
-
+  reg valid_stage[0:shiftStages+1];
+  // The mantissa quotient, its divide-by-zero and done flags.
   wire [23:0] Temp_Mantissa;
-
+  wire dbz, div_done;
+  // Stage 2: the signs' and exponents' registers.
+  reg capture_valid;
+  reg [7:0] A_Exponent_reg, B_Exponent_reg;
+  // The exponent difference, two bits a stage.
+  reg lowest_valid, second_valid, third_valid, final_valid;
+  reg [2:0] lowest_diff, second_diff, third_diff;
+  reg [4:0] final_diff;
+  reg [7:0] Temp_Exponent;
+  // The sign and exponent beside the divider's stages.
+  reg pipe_sign[1:shiftStages];
+  reg [7:0] pipe_Exponent[1:shiftStages];
+  // The result and its done.
   reg [22:0] intermediateMan;
   reg [7:0] intermediateExp;
   reg intermediateSign;
-
-  localparam bias = 7'b1111111;  // 127
-  localparam shiftStages = 24;  // Adjusted for 24-bit division
-  reg valid_stage[0:shiftStages+1];
-
-  // Divide by zero and done flags from divider
-  wire dbz, div_done;
+  reg [2:0] done_shift_reg;
 
   // Stage 1: Control path - valid signal
   always @(posedge clk_i or negedge rstn_i) begin
@@ -76,7 +85,6 @@ module fp32Divider (
   );
 
   // Stage 2: Control path - capture valid
-  reg capture_valid;
   always @(posedge clk_i or negedge rstn_i) begin
     if (~rstn_i) begin
       capture_valid <= 1'b0;
@@ -86,7 +94,6 @@ module fp32Divider (
   end
 
   // Stage 2: Data path - sign and exponent registration
-  reg [7:0] A_Exponent_reg, B_Exponent_reg;
   always @(posedge clk_i) begin
     if (valid_stage[0]) begin
       sign <= sign_A ^ sign_B;
@@ -96,7 +103,6 @@ module fp32Divider (
   end
 
   // Control path - valid signals for addition stages
-  reg lowest_valid, second_valid, third_valid, final_valid;
   always @(posedge clk_i or negedge rstn_i) begin
     if (~rstn_i) begin
       lowest_valid <= 1'b0;
@@ -112,9 +118,6 @@ module fp32Divider (
   end
 
   // Exponent subtraction stages (instead of addition for division)
-  reg [2:0] lowest_diff, second_diff, third_diff;
-  reg [4:0] final_diff;
-
   always @(posedge clk_i) begin
     if (capture_valid) begin
       lowest_diff <= A_Exponent_reg[1:0] - B_Exponent_reg[1:0];
@@ -169,9 +172,6 @@ module fp32Divider (
   end
 
   // Data path - sign and exponent pipeline registers
-  reg pipe_sign[1:shiftStages];
-  reg [7:0] pipe_Exponent[1:shiftStages];
-
   always @(posedge clk_i) begin
     for (int i = 1; i <= shiftStages; i = i + 1) begin
       if (valid_stage[i]) begin
@@ -195,9 +195,6 @@ module fp32Divider (
       end
     end
   end
-
-  // Output assignments
-  reg [2:0] done_shift_reg;
 
   always @(posedge clk_i or negedge rstn_i) begin
     if (~rstn_i) begin

@@ -15,17 +15,60 @@ module fp32Multiplier (
     output reg invalid_o     // High on 0*Inf or sNaN input
 );
 
+  typedef struct packed {
+    logic       is_nan;
+    logic       is_inf;
+    logic       is_zero;
+    logic       flag_ov;
+    logic       flag_un;
+    logic       flag_pot_un;
+    logic       flag_inv;
+    logic       sign;
+    logic [9:0] exp;
+  } meta_data_t;
+
+  // Stage 1: the unpacked operands and their classification flags.
   logic s1_valid;
   logic s1_sign_a, s1_sign_b;
   logic [7:0] s1_exp_a, s1_exp_b;
   logic [23:0] s1_man_a, s1_man_b;
-
-  // Classification Flags
   logic s1_is_input_zero;
   logic s1_is_input_inf;
   logic s1_is_input_nan;
   logic s1_is_invalid_op;
   logic s1_is_snan;
+  // The significand product (Karatsuba, six cycles).
+  logic        mult_valid_out;
+  logic [47:0] raw_product;
+  // The exponent sum, two bits a cycle beside the product, with the flags.
+  logic [3:0] exp_valid_pipe;
+  logic       pipe_carry     [0:3];
+  logic [9:0] pipe_sum       [0:3];
+  logic pipe_sign_a[0:3], pipe_sign_b[0:3];
+  logic pipe_in_zero[0:3];
+  logic pipe_in_inf [0:3];
+  logic pipe_in_nan [0:3];
+  logic pipe_inv_op [0:3];
+  logic pipe_in_snan[0:3];  // Pipeline sNaN flag
+  logic [7:0] pipe_exp_a[0:3], pipe_exp_b[0:3];
+  genvar i;
+  // Bias subtraction and the exceptions.
+  logic       exp_calc_sign;
+  logic       exp_calc_is_inf;
+  logic       exp_calc_is_zero;
+  logic       exp_calc_is_nan;
+  logic       flag_overflow;
+  logic       flag_underflow;
+  logic       flag_pot_underflow;
+  logic       flag_invalid;
+  logic [9:0] exp_calc_result;
+  // The exponent result delayed to the product.
+  meta_data_t sync_data;
+  logic [$bits(meta_data_t)-1:0] delay_reg;
+  // The normalized result.
+  logic final_is_underflow;
+  logic [7:0] final_exp;
+  logic [22:0] final_man;
 
   always_ff @(posedge clk_i or negedge rstn_i) begin
     if (!rstn_i) begin
@@ -88,9 +131,6 @@ module fp32Multiplier (
     end
   end
 
-  logic        mult_valid_out;
-  logic [47:0] raw_product;
-
   karatsubaUnsigned #(
       .WIDTH(24)
   ) u_karatsuba (
@@ -102,19 +142,6 @@ module fp32Multiplier (
       .valid_o       (mult_valid_out),
       .product_o     (raw_product)
   );
-
-  logic [3:0] exp_valid_pipe;
-  logic       pipe_carry     [0:3];
-  logic [9:0] pipe_sum       [0:3];
-  logic pipe_sign_a[0:3], pipe_sign_b[0:3];
-
-  logic pipe_in_zero[0:3];
-  logic pipe_in_inf [0:3];
-  logic pipe_in_nan [0:3];
-  logic pipe_inv_op [0:3];
-  logic pipe_in_snan[0:3];  // Pipeline sNaN flag
-
-  logic [7:0] pipe_exp_a[0:3], pipe_exp_b[0:3];
 
   // --- Adder Slice 0 (Bits 1:0) ---
   always_ff @(posedge clk_i) begin
@@ -137,7 +164,6 @@ module fp32Multiplier (
   end
 
   // --- Adder Slices 1 & 2 (Bits 3:2, 5:4) ---
-  genvar i;
   generate
     for (i = 1; i < 3; i++) begin : exp_pipe_mid
       always_ff @(posedge clk_i) begin
@@ -153,9 +179,9 @@ module fp32Multiplier (
 
           pipe_sum[i][(i*2)-1 : 0] <= pipe_sum[i-1][(i*2)-1 : 0];
 
-          {pipe_carry[i], pipe_sum[i][(i*2)+1 : (i*2)]} <= 
-              pipe_exp_a[i-1][(i*2)+1 : (i*2)] + 
-              pipe_exp_b[i-1][(i*2)+1 : (i*2)] + 
+          {pipe_carry[i], pipe_sum[i][(i*2)+1 : (i*2)]} <=
+              pipe_exp_a[i-1][(i*2)+1 : (i*2)] +
+              pipe_exp_b[i-1][(i*2)+1 : (i*2)] +
               pipe_carry[i-1];
 
           pipe_exp_a[i] <= pipe_exp_a[i-1];
@@ -179,24 +205,14 @@ module fp32Multiplier (
 
       pipe_sum[3][5:0] <= pipe_sum[2][5:0];
 
-      {pipe_sum[3][9:8], pipe_sum[3][7:6]} <= 
-              {2'b0, pipe_exp_a[2][7:6]} + 
-              {2'b0, pipe_exp_b[2][7:6]} + 
+      {pipe_sum[3][9:8], pipe_sum[3][7:6]} <=
+              {2'b0, pipe_exp_a[2][7:6]} +
+              {2'b0, pipe_exp_b[2][7:6]} +
               pipe_carry[2];
     end
   end
 
   // Bias Subtraction & Exception Calc
-  logic       exp_calc_sign;
-  logic       exp_calc_is_inf;
-  logic       exp_calc_is_zero;
-  logic       exp_calc_is_nan;
-  logic       flag_overflow;
-  logic       flag_underflow;
-  logic       flag_pot_underflow;
-  logic       flag_invalid;
-  logic [9:0] exp_calc_result;
-
   always_ff @(posedge clk_i) begin
     if (exp_valid_pipe[3]) begin
       exp_calc_sign <= pipe_sign_a[3] ^ pipe_sign_b[3];
@@ -235,21 +251,6 @@ module fp32Multiplier (
     end
   end
 
-  typedef struct packed {
-    logic       is_nan;
-    logic       is_inf;
-    logic       is_zero;
-    logic       flag_ov;
-    logic       flag_un;
-    logic       flag_pot_un;
-    logic       flag_inv;
-    logic       sign;
-    logic [9:0] exp;
-  } meta_data_t;
-
-  meta_data_t sync_data;
-
-  logic [$bits(meta_data_t)-1:0] delay_reg;
   always_ff @(posedge clk_i) begin
     delay_reg <= {
       exp_calc_is_nan,
@@ -264,10 +265,6 @@ module fp32Multiplier (
     };
   end
   assign sync_data = delay_reg;
-
-  logic final_is_underflow;
-  logic [7:0] final_exp;
-  logic [22:0] final_man;
 
   always_comb begin
     final_is_underflow = sync_data.flag_un || (sync_data.flag_pot_un && !raw_product[47]);

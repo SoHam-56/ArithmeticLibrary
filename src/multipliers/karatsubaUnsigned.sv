@@ -17,17 +17,31 @@ module karatsubaUnsigned #(
   localparam HALF_WIDTH = WIDTH / 2;
   localparam MID_WIDTH = HALF_WIDTH + 1;
 
+  // Stage 1: the halves, delayed beside the middle term's sums.
+  logic [HALF_WIDTH-1:0] A_high_d, A_low_d, B_high_d, B_low_d;
+  logic [MID_WIDTH-1:0] sum_A, sum_B;
+  logic s1_valid;
+  // Stages 2 and 3: the three Booth products.
+  logic [WIDTH-1:0] P_low_raw, P_high_raw;
+  logic [WIDTH+1:0] P_middle_raw;
+  logic mult_valid_out;
+  logic unused_valid_1, unused_valid_2;
+  // Stage 4: the first subtraction.
+  logic [WIDTH+1:0] mid_minus_high;
+  logic [WIDTH-1:0] P_low_d1, P_high_d1;
+  logic s4_valid;
+  // Stage 5: the middle term and the shifted high part.
+  logic [WIDTH+1:0] middle_term_final;
+  logic [(2*WIDTH)-1:0] P_high_shifted;
+  logic [WIDTH-1:0] P_low_d2;
+  logic s5_valid;
+
   // =========================================================================
   // Stage 1: Pre-Computation & Alignment
   // =========================================================================
   // The middle term needs an adder (AH + AL). This takes 1 cycle.
-  // We must delay the inputs for the High/Low multipliers by 1 cycle 
+  // We must delay the inputs for the High/Low multipliers by 1 cycle
   // so they stay synchronized with the middle term.
-
-  logic [HALF_WIDTH-1:0] A_high_d, A_low_d, B_high_d, B_low_d;
-  logic [MID_WIDTH-1:0] sum_A, sum_B;
-  logic s1_valid;
-
   always_ff @(posedge clk_i or negedge rstn_i) begin
     if (!rstn_i) begin
       A_high_d <= '0;
@@ -58,12 +72,6 @@ module karatsubaUnsigned #(
   // Stage 2 & 3: Parallel Multiplication
   // =========================================================================
   // All 3 multipliers start here. They have fixed internal latency (PIPELINE_DEPTH).
-
-  logic [WIDTH-1:0] P_low_raw, P_high_raw;
-  logic [WIDTH+1:0] P_middle_raw;
-
-  logic mult_valid_out;
-  logic unused_valid_1, unused_valid_2;
 
   // Low Part
   R4Booth #(HALF_WIDTH) booth_low (
@@ -102,11 +110,6 @@ module karatsubaUnsigned #(
   // Stage 4: Post-Processing - Subtraction
   // =========================================================================
   // Karatsuba Formula: Middle_Term = P_middle - P_high - P_low
-
-  logic [WIDTH+1:0] mid_minus_high;
-  logic [WIDTH-1:0] P_low_d1, P_high_d1;
-  logic s4_valid;
-
   always_ff @(posedge clk_i or negedge rstn_i) begin
     if (!rstn_i) begin
       mid_minus_high <= '0;
@@ -128,12 +131,6 @@ module karatsubaUnsigned #(
   // =========================================================================
   // Stage 5: Post-Processing - Final Middle Term & Shifting
   // =========================================================================
-
-  logic [WIDTH+1:0] middle_term_final;
-  logic [(2*WIDTH)-1:0] P_high_shifted;
-  logic [WIDTH-1:0] P_low_d2;
-  logic s5_valid;
-
   always_ff @(posedge clk_i or negedge rstn_i) begin
     if (!rstn_i) begin
       middle_term_final <= '0;
@@ -158,7 +155,6 @@ module karatsubaUnsigned #(
   // Stage 6: Final Adder
   // =========================================================================
   // Result = (P_high << WIDTH) + (Middle << HALF_WIDTH) + P_low
-
   always_ff @(posedge clk_i or negedge rstn_i) begin
     if (!rstn_i) begin
       product_o <= '0;

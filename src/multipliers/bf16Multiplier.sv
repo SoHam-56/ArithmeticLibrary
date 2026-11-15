@@ -29,11 +29,6 @@ module bf16Multiplier #(
   localparam logic [EXPONENT_WIDTH-1:0] EXPONENT_ALL_ONES = '1;
   localparam logic [DATA_WIDTH-1:0] CANONICAL_QNAN = {1'b0, EXPONENT_ALL_ONES, 1'b1, {(MANTISSA_WIDTH - 1) {1'b0}}};
 
-  // Integer formats have their own units (int8Multiplier, int32Adder): an int8 build must never fall through to this one.
-  if (EXPONENT_WIDTH < 2) begin : G_BAD_FORMAT
-    $fatal(1, "bf16Multiplier: EXPONENT_WIDTH=%0d is an integer format, not a float one", EXPONENT_WIDTH);
-  end
-
   typedef struct packed {
     logic          nan;
     logic          invalid;
@@ -43,11 +38,26 @@ module bf16Multiplier #(
     logic [EXPONENT_SUM_WIDTH-1:0] exponent_sum;
   } operation_class_t;
 
-  // Stage 1: classify, add the exponents, register the significands.
+  // Stage 1: the class, the exponent sum, the significands.
   logic s1_valid;
   operation_class_t s1_class;
   logic [SIGNIFICAND_WIDTH-1:0] s1_significand_a, s1_significand_b;
+  // The significand product, and the class beside it.
+  logic          product_valid;
+  logic [PRODUCT_WIDTH-1:0] significand_product;
+  operation_class_t class_delay[PRODUCT_LATENCY];
+  operation_class_t class_at_product;
+  // The range from the exponent sum, and the normalized result.
+  logic product_ge_two, exponent_overflow, exponent_underflow;
+  logic [EXPONENT_WIDTH-1:0] result_exponent;
+  logic [MANTISSA_WIDTH-1:0] result_mantissa;
 
+  // Integer formats have their own units (int8Multiplier, int32Adder): an int8 build must never fall through to this one.
+  if (EXPONENT_WIDTH < 2) begin : G_BAD_FORMAT
+    $fatal(1, "bf16Multiplier: EXPONENT_WIDTH=%0d is an integer format, not a float one", EXPONENT_WIDTH);
+  end
+
+  // Stage 1: classify, add the exponents, register the significands.
   always_ff @(posedge clk_i or negedge rstn_i) begin
     if (!rstn_i) begin
       s1_valid  <= 1'b0;
@@ -76,8 +86,6 @@ module bf16Multiplier #(
   end
 
   // Significand product: Karatsuba for wide significands, one registered multiply for narrow ones.
-  logic          product_valid;
-  logic [PRODUCT_WIDTH-1:0] significand_product;
   if (USE_KARATSUBA) begin : G_KARATSUBA
     karatsubaUnsigned #(
         .WIDTH(SIGNIFICAND_WIDTH)
@@ -103,18 +111,13 @@ module bf16Multiplier #(
   end
 
   // The classification travels beside the product.
-  operation_class_t class_delay[PRODUCT_LATENCY];
   always_ff @(posedge clk_i) begin
     class_delay[0] <= s1_class;
     for (int i = 1; i < PRODUCT_LATENCY; i++) class_delay[i] <= class_delay[i-1];
   end
-  operation_class_t class_at_product;
   assign class_at_product = class_delay[PRODUCT_LATENCY-1];
 
   // Range from the exponent sum, as fp32Multiplier's bias stage; normalize a product in [2, 4) by one place.
-  logic product_ge_two, exponent_overflow, exponent_underflow;
-  logic [EXPONENT_WIDTH-1:0] result_exponent;
-  logic [MANTISSA_WIDTH-1:0] result_mantissa;
   always_comb begin
     product_ge_two    = significand_product[PRODUCT_WIDTH-1];
     exponent_overflow = (class_at_product.exponent_sum >= EXPONENT_SUM_WIDTH'(EXPONENT_INF_CODE + EXPONENT_BIAS));

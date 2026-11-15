@@ -23,12 +23,11 @@ module divu #(
     );
 
     localparam FBITSW = (FBITS == 0) ? 1 : FBITS;  // avoid negative vector width when FBITS=0
+    localparam ITER = WIDTH + FBITS;  // iteration count: unsigned input width + fractional bits
 
     logic [WIDTH-1:0] b1;             // copy of divisor
     logic [WIDTH-1:0] quo, quo_next;  // intermediate quotient
     logic [WIDTH:0] acc, acc_next;    // accumulator (1 bit wider)
-
-    localparam ITER = WIDTH + FBITS;  // iteration count: unsigned input width + fractional bits
     logic [$clog2(ITER)-1:0] i;       // iteration counter
 
     // division algorithm iteration

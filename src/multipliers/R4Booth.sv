@@ -15,29 +15,29 @@ module R4Booth #(
 
   localparam NUM_PP = (N / 2) + 1;
 
-  // ---------------------------------------------------------
-  // Pipeline Stage 1: Partial Product Generation
-  // ---------------------------------------------------------
+  // Stage 1: the partial products, one per Booth triplet of the multiplier.
   logic [2*N-1:0] pp_reg[0:NUM_PP-1];
   logic valid_s1;
-
   // Signed helper signals
   logic signed [2*N-1:0] s_multiplicand;
   logic signed [2*N-1:0] s_multiplicand_x2;
   logic signed [2*N-1:0] s_multiplicand_neg;
   logic signed [2*N-1:0] s_multiplicand_x2_neg;
+  logic [2:0] triplet;
+  logic signed [2*N-1:0] pp_comb;
+  logic [N+2:0] multiplier_padded;
+  // Stage 2: the adder tree.
+  logic [(2*N)-1:0] adder_tree_comb;
 
+  // ---------------------------------------------------------
+  // Pipeline Stage 1: Partial Product Generation
+  // ---------------------------------------------------------
   // Sign extension
   assign s_multiplicand        = $signed({{(N) {1'b0}}, multiplicand});
   assign s_multiplicand_x2     = s_multiplicand << 1;
   assign s_multiplicand_neg    = -s_multiplicand;
   assign s_multiplicand_x2_neg = -s_multiplicand_x2;
-
-  logic [2:0] triplet;
-  logic signed [2*N-1:0] pp_comb;
-  logic [N+2:0] multiplier_padded;
-
-  assign multiplier_padded = {2'b00, multiplier, 1'b0};
+  assign multiplier_padded     = {2'b00, multiplier, 1'b0};
 
   always_ff @(posedge clk_i or negedge rstn_i) begin
     if (!rstn_i) begin
@@ -70,7 +70,6 @@ module R4Booth #(
   // ---------------------------------------------------------
   // Pipeline Stage 2: Summation (Adder Tree)
   // ---------------------------------------------------------
-  logic [(2*N)-1:0] adder_tree_comb;
   always_comb begin
     adder_tree_comb = '0;
     for (int k = 0; k < NUM_PP; k++) begin

@@ -28,11 +28,6 @@ module bf16Adder #(
   localparam logic [EXPONENT_WIDTH-1:0] EXPONENT_ALL_ONES = '1;
   localparam logic [DATA_WIDTH-1:0] CANONICAL_QNAN = {1'b0, EXPONENT_ALL_ONES, 1'b1, {(MANTISSA_WIDTH - 1) {1'b0}}};
 
-  // Integer formats have their own units (int8Multiplier, int32Adder): an int8 build must never fall through to this one.
-  if (EXPONENT_WIDTH < 2) begin : G_BAD_FORMAT
-    $fatal(1, "bf16Adder: EXPONENT_WIDTH=%0d is an integer format, not a float one", EXPONENT_WIDTH);
-  end
-
   typedef struct packed {
     logic             invalid;
     logic             nan;
@@ -50,12 +45,39 @@ module bf16Adder #(
     for (int i = 0; i < SUM_WIDTH; i++) if (x[i]) leading_zero_count = LEADING_ZERO_COUNT_WIDTH'(SUM_WIDTH - 1 - i);
   endfunction
 
-  // Stage 1: unpack, classify, order the operands by magnitude.
+  // Stage 1: the operands ordered by magnitude, their exponent difference, the class.
   logic s1_valid;
   logic [EXPONENT_WIDTH-1:0] s1_exponent_diff;
   logic [SIGNIFICAND_WIDTH-1:0] s1_big_significand, s1_small_significand;
   operation_class_t s1_class;
+  // Stage 2: the aligned significands.
+  logic s2_valid;
+  logic [ALIGNED_WIDTH-1:0] s2_big_significand, s2_small_significand;
+  operation_class_t s2_class;
+  // Stage 3: the sum.
+  logic s3_valid;
+  logic [SUM_WIDTH-1:0] s3_sum;
+  operation_class_t s3_class;
+  // Stage 4: the sum and its leading zeros.
+  logic s4_valid;
+  logic [SUM_WIDTH-1:0] s4_sum;
+  logic [LEADING_ZERO_COUNT_WIDTH-1:0] s4_leading_zeros;
+  /* verilator lint_off UNUSEDSIGNAL */  // s4_class's last field (sub) is spent by stage 4; as fpAdder
+  operation_class_t s4_class;
+  /* verilator lint_on UNUSEDSIGNAL */
+  // Stage 5: the normalized mantissa and exponent.
+  /* verilator lint_off UNUSEDSIGNAL */  // the carry, hidden-bit and three guard bits of normalized_mantissa are dropped by truncation; as fpAdder
+  logic [SUM_WIDTH-1:0] normalized_mantissa;
+  /* verilator lint_on UNUSEDSIGNAL */
+  logic [NORMALIZED_EXPONENT_WIDTH-1:0] normalized_exponent;
+  logic normalized_exponent_negative, normalized_exponent_nonpositive;
 
+  // Integer formats have their own units (int8Multiplier, int32Adder): an int8 build must never fall through to this one.
+  if (EXPONENT_WIDTH < 2) begin : G_BAD_FORMAT
+    $fatal(1, "bf16Adder: EXPONENT_WIDTH=%0d is an integer format, not a float one", EXPONENT_WIDTH);
+  end
+
+  // Stage 1: unpack, classify, order the operands by magnitude.
   always_ff @(posedge clk_i or negedge rstn_i) begin
     if (!rstn_i) begin
       s1_valid     <= 1'b0;
@@ -90,9 +112,6 @@ module bf16Adder #(
   end
 
   // Stage 2: align the smaller significand.
-  logic s2_valid;
-  logic [ALIGNED_WIDTH-1:0] s2_big_significand, s2_small_significand;
-  operation_class_t s2_class;
   always_ff @(posedge clk_i or negedge rstn_i)
     if (!rstn_i) s2_valid <= 1'b0;
     else s2_valid <= s1_valid;
@@ -106,9 +125,6 @@ module bf16Adder #(
     end
 
   // Stage 3: add or subtract.
-  logic s3_valid;
-  logic [SUM_WIDTH-1:0] s3_sum;
-  operation_class_t s3_class;
   always_ff @(posedge clk_i or negedge rstn_i)
     if (!rstn_i) s3_valid <= 1'b0;
     else s3_valid <= s2_valid;
@@ -119,12 +135,6 @@ module bf16Adder #(
     end
 
   // Stage 4: count leading zeros.
-  logic s4_valid;
-  logic [SUM_WIDTH-1:0] s4_sum;
-  logic [LEADING_ZERO_COUNT_WIDTH-1:0] s4_leading_zeros;
-  /* verilator lint_off UNUSEDSIGNAL */  // s4_class's last field (sub) is spent by stage 4; as fpAdder
-  operation_class_t s4_class;
-  /* verilator lint_on UNUSEDSIGNAL */
   always_ff @(posedge clk_i or negedge rstn_i)
     if (!rstn_i) s4_valid <= 1'b0;
     else s4_valid <= s3_valid;
@@ -137,10 +147,6 @@ module bf16Adder #(
     end
 
   // Normalize, in fp32Adder's order of cases.
-  /* verilator lint_off UNUSEDSIGNAL */  // the carry, hidden-bit and three guard bits of normalized_mantissa are dropped by truncation; as fpAdder
-  logic [SUM_WIDTH-1:0] normalized_mantissa;
-  /* verilator lint_on UNUSEDSIGNAL */
-  logic [NORMALIZED_EXPONENT_WIDTH-1:0] normalized_exponent;
   always_comb begin
     normalized_mantissa = s4_sum;
     normalized_exponent = NORMALIZED_EXPONENT_WIDTH'(s4_class.big_exponent);
@@ -158,8 +164,6 @@ module bf16Adder #(
       end
     end
   end
-
-  logic normalized_exponent_negative, normalized_exponent_nonpositive;
   assign normalized_exponent_negative    = normalized_exponent[NORMALIZED_EXPONENT_WIDTH-1];
   assign normalized_exponent_nonpositive = normalized_exponent_negative || (normalized_exponent == '0);
 

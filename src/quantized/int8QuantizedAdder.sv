@@ -43,6 +43,9 @@ module int8QuantizedAdder (
   logic signed [SUM_WIDTH-1:0] s3_sum;
   logic signed [ROUNDED_WIDTH-1:0] s4_rnd;
   logic signed [9:0] s5_r;  // the rounded, shifted sum saturated to 10 bits
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic unused_wide;  // the products' extra sign bits and the second product's done, the first's
+  /* verilator lint_on UNUSEDSIGNAL */
 
   always_ff @(posedge clk_i or negedge rstn_i)
     if (!rstn_i) {v1, pv, v3, v4, v5, done_o} <= '0;
@@ -133,10 +136,7 @@ module int8QuantizedAdder (
       result_o <= y[7:0];
     end
 
-  /* verilator lint_off UNUSEDSIGNAL */
-  logic unused_wide;
-  assign unused_wide = ^{s2_w1[PRODUCT_WIDTH], s2_w2[PRODUCT_WIDTH], p2_v};  // the second product's done is the first's
-  /* verilator lint_on UNUSEDSIGNAL */
+  assign unused_wide = ^{s2_w1[PRODUCT_WIDTH], s2_w2[PRODUCT_WIDTH], p2_v};
 
 `ifndef SYNTHESIS
   localparam int MAX_SHIFT = MANTISSA_WIDTH + 9;  // the encoder's largest shift (ratios down to 2^-10)
