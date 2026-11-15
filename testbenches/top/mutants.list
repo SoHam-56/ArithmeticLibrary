@@ -13,7 +13,7 @@ mul_fp32_is_add|fp32|mul|src/fmt_mul.sv|s/    fp32Multiplier MUL (/    fp32Adder
 mul_int8_is_int16|int8|mul|src/fmt_mul.sv|s/    int8Multiplier MUL (/    int16Multiplier MUL (/|8 32|y
 add_lane_bf16_is_mul|bf16|add|src/fmt_add.sv|s/    bf16Adder ADD (/    bf16Multiplier ADD (/|16|y
 add_lane_lat_bf16|bf16|add|pkg|s/localparam int LANE_ADD_LATENCY = 5;  \/\/ bf16Adder/localparam int LANE_ADD_LATENCY = 4;/|16|n
-mul_mesh_lat_int8|int8|mul|pkg|s/localparam int MUL_LATENCY = 1;  \/\/ mesh product: int8Multiplier/localparam int MUL_LATENCY = 2;/|8 32|n
+mul_mesh_lat_int8|int8|mul|pkg|s/localparam int MUL_LATENCY = 2;  \/\/ mesh product/localparam int MUL_LATENCY = 3;  \/\/ mesh product/|8 32|n
 requantize_shift_plus_one|int8|requantize|tops|s/.shift_i(params_i.shift),/.shift_i(params_i.shift + 6'd1),/||s
 requantize_zero_point_ignored|int8|requantize|tops|s/.zp_i(params_i.zero_point)/.zp_i(8'sd0)/||s
 quantized_add_in1_zero_point_ignored|int8|quantized_add|tops|s/.zp1_i(params_i.in1_zero_point)/.zp1_i(8'sd0)/||s

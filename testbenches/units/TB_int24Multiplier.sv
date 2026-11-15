@@ -114,9 +114,9 @@ module TB_int24Multiplier #(
       errs++;
       $display("[FAIL] %0d results for %0d pairs", checked, n_expect);
     end
-    if (lat != sienna_fmt_pkg::LANE_MUL_LATENCY) begin
+    if (lat != sienna_fmt_pkg::POST_MUL_LATENCY) begin
       errs++;
-      $display("[FAIL] latency %0d, sienna_fmt_pkg::LANE_MUL_LATENCY says %0d", lat, sienna_fmt_pkg::LANE_MUL_LATENCY);
+      $display("[FAIL] latency %0d, sienna_fmt_pkg::POST_MUL_LATENCY says %0d", lat, sienna_fmt_pkg::POST_MUL_LATENCY);
     end
     $display("int24Multiplier: %0d products against the C reference, %0d errors, latency %0d, %0d idle cycles", checked, errs, lat, idles);
     $display("RESULT: %s", errs == 0 ? "PASSED" : "FAILED");

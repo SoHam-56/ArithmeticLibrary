@@ -14,7 +14,7 @@ endmodule
 
 module eq_int24_mul (input logic clk_i, rstn_i, valid_i, input logic [23:0] a_i, b_i, output logic [47:0] result_new, result_generic, output logic done_new, done_generic);
   int24Multiplier NEW (.clk_i, .rstn_i, .valid_i, .a_i(a_i), .b_i(b_i), .result_o(result_new), .done_o(done_new));
-  intMultiplier #(.W(24)) GEN (.clk_i, .rstn_i, .valid_i, .A(a_i), .B(b_i), .result_o(result_generic), .done_o(done_generic));
+  intMultiplier #(.W(24), .STAGES(3)) GEN (.clk_i, .rstn_i, .valid_i, .A(a_i), .B(b_i), .result_o(result_generic), .done_o(done_generic));
 endmodule
 
 module eq_int32_add (input logic clk_i, rstn_i, valid_i, input logic [31:0] a_i, b_i, output logic [31:0] result_new, result_generic, output logic done_new, done_generic);

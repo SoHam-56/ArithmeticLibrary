@@ -1,2 +1,2 @@
-# b_unsigned: b is zero-extended (make int8Multiplier-mutant must see its bench FAIL)
-s/(2 \* DATA_WIDTH)'(b_i);/(2 * DATA_WIDTH)'($unsigned(b_i));/
+# b_sign_flipped: b's sign bit inverted on the way in (make int8Multiplier-mutant must see its bench FAIL)
+s/\.b_i(b_i)/.b_i(b_i ^ 8'sh80)/

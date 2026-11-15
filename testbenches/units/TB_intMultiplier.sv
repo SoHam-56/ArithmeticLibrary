@@ -119,9 +119,9 @@ module TB_intMultiplier #(
       errs++;
       $display("[FAIL] %0d results for %0d pairs", checked, n_expect);
     end
-    if (lat != 1) begin  // intMultiplier registers its product once at every width
+    if (lat != 2) begin  // intMultiplier is intMulPipe at two stages at every width
       errs++;
-      $display("[FAIL] latency %0d, intMultiplier's is 1", lat);
+      $display("[FAIL] latency %0d, intMultiplier's is 2", lat);
     end
     $display("intMultiplier W=%0d: %0d products against the C reference, %0d errors, latency %0d, %0d idle cycles", W, checked,
              errs, lat, idles);

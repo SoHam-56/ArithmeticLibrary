@@ -17,21 +17,21 @@ module TB_sienna_fmt_map;
 
 `ifdef FMT_INT8
   localparam string WANT_NAME = "int8";
-  localparam int WANT[15] = '{8, 32, 32, 32, 16, 1, 1, 1, 0, 5, 6, 0, 0, 1, 1};  // widths, latencies, the HAS_ flags
+  localparam int WANT[16] = '{8, 32, 32, 32, 16, 2, 1, 2, 0, 6, 7, 0, 0, 1, 1, 3};  // widths, latencies, the HAS_ flags, POST_MUL_LATENCY
   localparam int WANT_LOWEST = 32'h80, WANT_ONE = 1;
   localparam int WANT_BITS[5] = '{67, 54, 110, 83, 30};  // lane_params_t, requant_params_t, add_params_t, lane_entry_t, requant_scale_t
   localparam int WANT_KEEP = 1;  // DROPOUT_KEEP_SCALE, unused in int8
-  localparam int WANT_LANE[4] = '{0, 7, 3, 2};  // EXPONENT_WIDTH, MANTISSA_WIDTH, HORNER_STEP_LATENCY, HORNER_COEFFICIENT_LAG
+  localparam int WANT_LANE[4] = '{0, 7, 4, 3};  // EXPONENT_WIDTH, MANTISSA_WIDTH, HORNER_STEP_LATENCY, HORNER_COEFFICIENT_LAG
 `elsif FMT_BF16
   localparam string WANT_NAME = "bf16";
-  localparam int WANT[15] = '{16, 32, 16, 16, 16, 3, 5, 3, 5, 0, 0, 3, 1, 0, 0};
+  localparam int WANT[16] = '{16, 32, 16, 16, 16, 3, 5, 3, 5, 0, 0, 3, 1, 0, 0, 3};
   localparam int WANT_LOWEST = 32'hFF80, WANT_ONE = 32'h3F80;
   localparam int WANT_BITS[5] = '{1, 1, 1, 1, 1};
   localparam int WANT_KEEP = 32'h4000;
   localparam int WANT_LANE[4] = '{8, 7, 8, 3};
 `else
   localparam string WANT_NAME = "fp32";
-  localparam int WANT[15] = '{32, 32, 32, 32, 32, 8, 5, 8, 5, 0, 0, 8, 0, 0, 0};  // fp32 has no GPNAE tail
+  localparam int WANT[16] = '{32, 32, 32, 32, 32, 8, 5, 8, 5, 0, 0, 8, 0, 0, 0, 8};  // fp32 has no GPNAE tail
   localparam int WANT_LOWEST = 32'hFF800000, WANT_ONE = 32'h3F800000;
   localparam int WANT_BITS[5] = '{1, 1, 1, 1, 1};
   localparam int WANT_KEEP = 32'h40000000;
@@ -64,6 +64,7 @@ module TB_sienna_fmt_map;
     expect_eq("HAS_FLOAT_TAIL", int'(HAS_FLOAT_TAIL), WANT[12]);
     expect_eq("HAS_REQUANT_EPILOGUE", int'(HAS_REQUANT_EPILOGUE), WANT[13]);
     expect_eq("HAS_RESIDUAL_ADD", int'(HAS_RESIDUAL_ADD), WANT[14]);
+    expect_eq("POST_MUL_LATENCY", int'(POST_MUL_LATENCY), WANT[15]);
     expect_eq("LOWEST_VALUE", int'(LOWEST_VALUE), WANT_LOWEST);
     expect_eq("ONE_VALUE", int'(ONE_VALUE), WANT_ONE);
     expect_eq("$bits(lane_params_t)", int'($bits(lane_params_t)), WANT_BITS[0]);

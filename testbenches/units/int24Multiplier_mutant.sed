@@ -1,2 +1,2 @@
-# product_47_bits: the product keeps 47 bits, sign-extended: only -2^23 x -2^23 = 2^46 changes (make int24Multiplier-mutant must see its bench FAIL)
-s/result_o <= (2 \* DATA_WIDTH)'(a_i) \* (2 \* DATA_WIDTH)'(b_i);/result_o <= (2 * DATA_WIDTH)'($signed(47'((2 * DATA_WIDTH)'(a_i) * (2 * DATA_WIDTH)'(b_i))));/
+# a_plus_one: a off by one on the way in (make int24Multiplier-mutant must see its bench FAIL)
+s/\.a_i(a_i)/.a_i(a_i + 24'sd1)/
