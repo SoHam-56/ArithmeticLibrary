@@ -232,6 +232,38 @@ common-mem_fatal:
 	line=$$(command grep -m1 -F "$$want" $$log); \
 	[ -n "$$line" ] && echo "mem fatal: fired: $$line" || { echo "mem FAIL: MODE=3: no '$$want'"; tail -20 $$log; exit 1; }
 
+# Pipelined integer multiplier: lint of every use's shape, TB_intMulPipe (corners and random pairs against a_i * b_i) in each of them.
+MP_SRC  = $(SRC)/multipliers/intMulPipe.sv
+MP_CFGS = 16_16_2 24_24_3 32_25_3 33_9_2 3_2_2
+MP_RUNS = $(addprefix common-mulpipe_run_,$(MP_CFGS))
+MP_G    = -GAW=$(word 1,$(1)) -GBW=$(word 2,$(1)) -GSTAGES=$(word 3,$(1))
+MP_P    = -pvalue+TB_intMulPipe.AW=$(word 1,$(1)) -pvalue+TB_intMulPipe.BW=$(word 2,$(1)) -pvalue+TB_intMulPipe.STAGES=$(word 3,$(1))
+MP_BUILD = $(if $(filter vcs,$(SIM)),$(call vcs_build,TB_intMulPipe,$$d,$(MP_SRC) $(TBU)/TB_intMulPipe.sv,$(1)),verilator $(CM_FLAGS) --top-module TB_intMulPipe $(2) --Mdir $$d $(MP_SRC) $(TBU)/TB_intMulPipe.sv -o sim)
+
+common-mulpipe: common-mulpipe_lint $(MP_RUNS)
+	@echo "mulpipe OK: $(words $(MP_CFGS)) of $(words $(MP_CFGS)) shapes passed"
+
+common-mulpipe_lint:
+ifeq ($(SIM),vcs)
+	@echo "mulpipe lint: not applicable to VCS (verilator --lint-only -Wall; VCS's +lint=all is the lint points' job)"
+else
+	@w=0; e=0; for cfg in $(MP_CFGS); do set -- $$(echo $$cfg | tr _ ' '); \
+	  verilator --lint-only -Wall -DSYNTHESIS --top-module intMulPipe -GAW=$$1 -GBW=$$2 -GSTAGES=$$3 $(MP_SRC) > $(ROOT)/Verilator/common/mulpipe_lint.log 2>&1; \
+	  w=$$((w + $$(command grep -c '^%Warning' $(ROOT)/Verilator/common/mulpipe_lint.log))); \
+	  e=$$((e + $$(command grep -c '^%Error' $(ROOT)/Verilator/common/mulpipe_lint.log))); \
+	done; \
+	echo "mulpipe lint: $$w warnings, $$e errors"; \
+	[ $$w -eq 0 ] && [ $$e -eq 0 ] || { cat $(ROOT)/Verilator/common/mulpipe_lint.log; exit 1; }
+endif
+
+$(MP_RUNS): common-mulpipe_run_%:
+	@c=$*; d=$(CM_V)/mulpipe_$$c; rm -rf $$d; mkdir -p $(CM_V); set -- $$(echo $$c | tr _ ' '); \
+	$(call MP_BUILD,$(call MP_P,$$1 $$2 $$3),$(call MP_G,$$1 $$2 $$3)) > $$d.build.log 2>&1 \
+	  || { echo "mulpipe FAIL: $$c: BUILD FAILED"; tail -20 $$d.build.log; exit 1; }; \
+	$$d/sim $(if $(filter vcs,$(SIM)),$(VCS_RUN)) > $$d.run.log 2>&1; \
+	line=$$(command grep -m1 "^MULPIPE " $$d.run.log); \
+	[ $$(command grep -c "^RESULT: PASSED" $$d.run.log) -eq 1 ] && echo "mulpipe run: $$line" || { echo "mulpipe FAIL: $$c: $$line"; tail -20 $$d.run.log; exit 1; }
+
 # expected $fatal per mode: 6 and 7 stop the build (elaboration), 8 stops the simulation at time 0
 CREDIT_FATAL_6 = credit_counter: CRW
 CREDIT_FATAL_7 = credit_counter: MAX 0 must be at least 1
@@ -245,7 +277,8 @@ $(CREDIT_FATALS): common-credit_fatal_%:
 	[ -n "$$line" ] && echo "credit OK: MODE=$$m fired: $$line" || { echo "credit FAIL: MODE=$$m: no '$$want'"; tail -20 $$log; exit 1; }
 
 .PHONY: common-pkg_fp32 common-pkg_bf16 common-pkg_int8 common-pkg_mutant common-dump32 common-ipu common-fpu common-truth common-credit \
-        common-credit_lint $(CREDIT_RUNS) $(CREDIT_FATALS) common-mem common-mem_lint $(MEM_RUNS) common-mem_fatal
+        common-credit_lint $(CREDIT_RUNS) $(CREDIT_FATALS) common-mem common-mem_lint $(MEM_RUNS) common-mem_fatal \
+        common-mulpipe common-mulpipe_lint $(MP_RUNS)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # The per-format units' direct reference benches: <unit>-verilator (its bench against its C reference through DPI), <unit>-vcs (the same bench
@@ -297,9 +330,9 @@ BOOTH_KARATSUBA = $(SRC)/multipliers/R4Booth.sv $(SRC)/multipliers/karatsubaUnsi
 $(eval $(call ref_bench,bf16Multiplier,BF16,$(BOOTH_KARATSUBA),sf,sf,sign_of_a_only,multipliers))
 $(eval $(call ref_bench,bf16Adder,BF16,,sf,sf,carry_exponent_kept,adders))
 $(eval $(call ref_bench,bf16WideMultiplier,BF16,,sf,sf,product_lsb_dropped,multipliers))
-$(eval $(call ref_bench,int8Multiplier,INT8,,int,ref,b_unsigned,multipliers))
-$(eval $(call ref_bench,int16Multiplier,INT8,,int,ref,a_unsigned,multipliers))
-$(eval $(call ref_bench,int24Multiplier,INT8,,int,ref,product_47_bits,multipliers))
+$(eval $(call ref_bench,int8Multiplier,INT8,$(SRC)/multipliers/intMulPipe.sv,int,ref,b_sign_flipped,multipliers))
+$(eval $(call ref_bench,int16Multiplier,INT8,$(SRC)/multipliers/intMulPipe.sv,int,ref,b_sign_flipped,multipliers))
+$(eval $(call ref_bench,int24Multiplier,INT8,$(SRC)/multipliers/intMulPipe.sv,int,ref,a_plus_one,multipliers))
 $(eval $(call ref_bench,int32Adder,INT8,,int,ref,carry_cut_at_16,adders))
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -334,7 +367,7 @@ else
 endif
 
 IM_V      = $(call unit_dir,intMultiplier)
-IM_RTL    = $(SRC)/multipliers/intMultiplier.sv
+IM_RTL    = $(SRC)/multipliers/intMulPipe.sv $(SRC)/multipliers/intMultiplier.sv
 
 intMultiplier-build:
 ifeq ($(SIM),vcs)
@@ -422,7 +455,7 @@ Q8_FLAGS = $(VFLAGS) +define+FMT_INT8 -I$(TBU) $(VWNO)
 RUN_CHECKED = set -o pipefail; $(1) | tee $(2) && command grep -q '^RESULT: PASSED' $(2) && ! command grep -qE '^(\[[0-9]+\] )?%[E]rror|Assertion [f]ailed|^([E]rror|[F]atal): "|^[E]rror-\[' $(2) || { echo "$(3): the simulation failed, printed an error or a failed assertion, or printed no RESULT: PASSED ($(2))"; exit 1; }
 define quant_bench
 $(1)_V      = $$(call unit_dir,$(1))
-$(1)_DESIGN = $$(PKG) $(SRC)/quantized/$(1).sv
+$(1)_DESIGN = $$(PKG) $(SRC)/multipliers/intMulPipe.sv $(SRC)/quantized/$(1).sv
 $(1)_BUILD  = $$(if $$(filter vcs,$$(SIM)),$$(call vcs_build,TB_$(1),$$($(1)_V)/ref,$$($(1)_DESIGN) $$(TBU)/TB_$(1).sv $$(TBU)/int_ref.cpp,+define+FMT_INT8 +incdir+$$(TBU) -CFLAGS "-I$$(TBU)"),verilator $$(Q8_FLAGS) --top-module TB_$(1) --Mdir $$($(1)_V)/ref $$($(1)_DESIGN) $$(TBU)/TB_$(1).sv $$(TBU)/int_ref.cpp -CFLAGS "-I$$(TBU)" -o sim)
 
 $(1)-verilator $(1)-vcs:
@@ -440,11 +473,11 @@ $(1)-shift_bad:
 
 $(1)-lint:
 ifeq ($$(SIM),vcs)
-	$$(call vcs_lint,$(1),$(1),$(SRC)/quantized/$(1).sv,+define+SYNTHESIS)
-	$$(call vcs_lint,$(1) (assertions),$(1),$(SRC)/quantized/$(1).sv,)
+	$$(call vcs_lint,$(1),$(1),$(SRC)/multipliers/intMulPipe.sv $(SRC)/quantized/$(1).sv,+define+SYNTHESIS)
+	$$(call vcs_lint,$(1) (assertions),$(1),$(SRC)/multipliers/intMulPipe.sv $(SRC)/quantized/$(1).sv,)
 else
-	bash $$(SCRIPTS)/lint.sh "lint $(1)" -Wall -Wno-fatal -DSYNTHESIS --top-module $(1) $(SRC)/quantized/$(1).sv
-	bash $$(SCRIPTS)/lint.sh "lint $(1) (assertions)" -Wall -Wno-fatal --top-module $(1) $(SRC)/quantized/$(1).sv
+	bash $$(SCRIPTS)/lint.sh "lint $(1)" -Wall -Wno-fatal -DSYNTHESIS --top-module $(1) $(SRC)/multipliers/intMulPipe.sv $(SRC)/quantized/$(1).sv
+	bash $$(SCRIPTS)/lint.sh "lint $(1) (assertions)" -Wall -Wno-fatal --top-module $(1) $(SRC)/multipliers/intMulPipe.sv $(SRC)/quantized/$(1).sv
 endif
 
 .PHONY: $(1)-verilator $(1)-vcs $(1)-shift_bad $(1)-lint
@@ -564,7 +597,7 @@ FM_UNITS = $(SRC)/multipliers/R4Booth.sv $(SRC)/multipliers/karatsubaUnsigned.sv
         $(SRC)/multipliers/bf16Multiplier.sv $(SRC)/adders/bf16Adder.sv \
         $(SRC)/multipliers/bf16WideMultiplier.sv $(SRC)/converters/fp32ToBf16.sv \
         $(SRC)/multipliers/int8Multiplier.sv $(SRC)/adders/int32Adder.sv \
-        $(SRC)/quantized/int8Requantizer.sv $(SRC)/quantized/int8QuantizedAdder.sv
+        $(SRC)/multipliers/intMulPipe.sv $(SRC)/quantized/int8Requantizer.sv $(SRC)/quantized/int8QuantizedAdder.sv
 FM_GENERIC = $(SRC)/multipliers/intMultiplier.sv $(SRC)/adders/intAdder.sv
 FM_EQ_ONLY = $(SRC)/multipliers/int16Multiplier.sv $(SRC)/multipliers/int24Multiplier.sv  # GPNAE's units, proven here
 FM_WRAPPERS = $(SRC)/fmt/fmt_mul.sv $(SRC)/fmt/fmt_add.sv
