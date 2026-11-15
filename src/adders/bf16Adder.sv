@@ -65,7 +65,13 @@ module bf16Adder #(
   /* verilator lint_off UNUSEDSIGNAL */  // s4_class's last field (sub) is spent by stage 4; as fpAdder
   operation_class_t s4_class;
   /* verilator lint_on UNUSEDSIGNAL */
-  // Stage 5: the normalized mantissa and exponent.
+  // Stage 5: the normalized mantissa and exponent, registered; stage 6 packs the result.
+  logic s5_valid;
+  /* verilator lint_off UNUSEDSIGNAL */  // the carry, hidden-bit and guard bits of s5_mantissa are dropped by truncation; s5_class's exponent and sub are spent
+  logic [SUM_WIDTH-1:0] s5_mantissa;
+  operation_class_t s5_class;
+  /* verilator lint_on UNUSEDSIGNAL */
+  logic [NORMALIZED_EXPONENT_WIDTH-1:0] s5_exponent;
   /* verilator lint_off UNUSEDSIGNAL */  // the carry, hidden-bit and three guard bits of normalized_mantissa are dropped by truncation; as fpAdder
   logic [SUM_WIDTH-1:0] normalized_mantissa;
   /* verilator lint_on UNUSEDSIGNAL */
@@ -164,9 +170,20 @@ module bf16Adder #(
       end
     end
   end
-  assign normalized_exponent_negative    = normalized_exponent[NORMALIZED_EXPONENT_WIDTH-1];
-  assign normalized_exponent_nonpositive = normalized_exponent_negative || (normalized_exponent == '0);
+  // Stage 5: the normalized mantissa and exponent, registered (the leading-zero shift and the exponent subtract; the result mux follows).
+  always_ff @(posedge clk_i or negedge rstn_i)
+    if (!rstn_i) s5_valid <= 1'b0;
+    else s5_valid <= s4_valid;
+  always_ff @(posedge clk_i)
+    if (s4_valid) begin
+      s5_mantissa <= normalized_mantissa;
+      s5_exponent <= normalized_exponent;
+      s5_class    <= s4_class;
+    end
+  assign normalized_exponent_negative    = s5_exponent[NORMALIZED_EXPONENT_WIDTH-1];
+  assign normalized_exponent_nonpositive = normalized_exponent_negative || (s5_exponent == '0);
 
+  // Stage 6: the result and its flags.
   always_ff @(posedge clk_i or negedge rstn_i) begin
     if (!rstn_i) begin
       result_o    <= '0;
@@ -175,21 +192,21 @@ module bf16Adder #(
       underflow_o <= 1'b0;
       invalid_o   <= 1'b0;
     end else begin
-      done_o      <= s4_valid;
+      done_o      <= s5_valid;
       overflow_o  <= 1'b0;
       underflow_o <= 1'b0;
       invalid_o   <= 1'b0;
-      if (s4_valid) begin
-        invalid_o  <= s4_class.invalid;
-        overflow_o <= !normalized_exponent_negative && (normalized_exponent >= NORMALIZED_EXPONENT_WIDTH'(EXPONENT_INF_CODE)) && !s4_class.inf && !s4_class.nan;
-        if (s4_class.nan) result_o <= CANONICAL_QNAN;
-        else if (s4_class.inf) result_o <= {s4_class.sign, EXPONENT_ALL_ONES, {MANTISSA_WIDTH{1'b0}}};
-        else if (s4_class.zero) result_o <= {s4_class.sign, {(DATA_WIDTH - 1) {1'b0}}};
-        else if (normalized_exponent_nonpositive && !s4_class.bypass) begin
-          result_o    <= {s4_class.sign, {(DATA_WIDTH - 1) {1'b0}}};
+      if (s5_valid) begin
+        invalid_o  <= s5_class.invalid;
+        overflow_o <= !normalized_exponent_negative && (s5_exponent >= NORMALIZED_EXPONENT_WIDTH'(EXPONENT_INF_CODE)) && !s5_class.inf && !s5_class.nan;
+        if (s5_class.nan) result_o <= CANONICAL_QNAN;
+        else if (s5_class.inf) result_o <= {s5_class.sign, EXPONENT_ALL_ONES, {MANTISSA_WIDTH{1'b0}}};
+        else if (s5_class.zero) result_o <= {s5_class.sign, {(DATA_WIDTH - 1) {1'b0}}};
+        else if (normalized_exponent_nonpositive && !s5_class.bypass) begin
+          result_o    <= {s5_class.sign, {(DATA_WIDTH - 1) {1'b0}}};
           underflow_o <= 1'b1;
-        end else if (normalized_exponent >= NORMALIZED_EXPONENT_WIDTH'(EXPONENT_INF_CODE)) result_o <= {s4_class.sign, EXPONENT_ALL_ONES, {MANTISSA_WIDTH{1'b0}}};
-        else result_o <= {s4_class.sign, normalized_exponent[EXPONENT_WIDTH-1:0], normalized_mantissa[ALIGNED_WIDTH-2-:MANTISSA_WIDTH]};
+        end else if (s5_exponent >= NORMALIZED_EXPONENT_WIDTH'(EXPONENT_INF_CODE)) result_o <= {s5_class.sign, EXPONENT_ALL_ONES, {MANTISSA_WIDTH{1'b0}}};
+        else result_o <= {s5_class.sign, s5_exponent[EXPONENT_WIDTH-1:0], s5_mantissa[ALIGNED_WIDTH-2-:MANTISSA_WIDTH]};
       end
     end
   end

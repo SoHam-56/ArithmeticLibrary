@@ -1,8 +1,9 @@
 `timescale 1ns / 100ps
 
-// Affine int8 requantize: y = clamp(sat10(floor((acc * mult + 2^(shift - 1)) / 2^shift)) + zp, act_min, act_max), 6 stages: the product
+// Affine int8 requantize: y = clamp(sat10(floor((acc * mult + 2^(shift - 1)) / 2^shift)) + zp, act_min, act_max), 7 stages: the product
 // takes three on intMulPipe (one row per mantissa bit, the carry-save tree registered halfway, one add), since the 32 x 24 product in one
-// cycle, and then in two halves, was the int8 build's worst path.
+// cycle, and then in two halves, was the int8 build's worst path; the rounding add and the shift take one each (the 57-bit add into the
+// barrel shift was the next); the last stage compares the shifted value with the clamp bounds less zp, beside its add of zp.
 module int8Requantizer (
     input  logic               clk_i,
     input  logic               rstn_i,
@@ -23,12 +24,15 @@ module int8Requantizer (
   localparam logic signed [9:0] SAT_MIN = -10'sd512;
   localparam int MUL_STAGES = 3;
 
-  logic s1_v, p_v, s3_v;
+  logic s1_v, p_v, s3a_v, s3_v;
   logic [MUL_STAGES-1:0] pv;  // the product's stages
   logic signed [31:0] s1_acc;
   logic [MANTISSA_WIDTH-1:0] s1_mult;
   logic [5:0] s1_shift;
-  logic signed [7:0] s1_zp, s1_lo, s1_hi, s3_zp, s3_lo, s3_hi;
+  logic signed [7:0] s1_zp, s1_lo, s1_hi, s3a_zp, s3a_lo, s3a_hi, s3_zp;
+  logic [5:0] s3a_shift;
+  logic signed [ROUNDED_WIDTH-1:0] s3a_sum;  // the product plus half
+  logic signed [8:0] s3_lo_m, s3_hi_m;  // the clamp bounds less zp: r is clamped against them, then zp is added
   logic [ROUNDED_WIDTH-1:0] s1_half;  // 2^(shift - 1), 0 at shift 0
   // Beside the product: the shift, its half, zp and the clamp.
   logic [5:0] d_shift[MUL_STAGES];
@@ -45,12 +49,14 @@ module int8Requantizer (
     if (!rstn_i) begin
       s1_v   <= 1'b0;
       pv     <= '0;
+      s3a_v  <= 1'b0;
       s3_v   <= 1'b0;
       done_o <= 1'b0;
     end else begin
       s1_v   <= valid_i;
       pv     <= {pv[MUL_STAGES-2:0], s1_v};
-      s3_v   <= p_v;
+      s3a_v  <= p_v;
+      s3_v   <= s3a_v;
       done_o <= s3_v;
     end
   end
@@ -89,25 +95,36 @@ module int8Requantizer (
       end
   end
 
-  // Stage 3: round half up (floor of the product plus half), arithmetic right shift, saturate to 10 bits.
+  // Stage 3a: round half up: the product plus half, exact.
   always_ff @(posedge clk_i)
     if (p_v) begin
-      automatic logic signed [ROUNDED_WIDTH-1:0] r = ($signed({s2_prod[PRODUCT_WIDTH-1], s2_prod}) + $signed(d_half[MUL_STAGES-1])) >>> d_shift[MUL_STAGES-1];
+      s3a_sum   <= $signed({s2_prod[PRODUCT_WIDTH-1], s2_prod}) + $signed(d_half[MUL_STAGES-1]);
+      s3a_shift <= d_shift[MUL_STAGES-1];
+      s3a_zp    <= d_zp[MUL_STAGES-1];
+      s3a_lo    <= d_lo[MUL_STAGES-1];
+      s3a_hi    <= d_hi[MUL_STAGES-1];
+    end
+
+  // Stage 3b: arithmetic right shift (floor), saturate to 10 bits; the clamp bounds less zp, so the last stage compares as it adds.
+  always_ff @(posedge clk_i)
+    if (s3a_v) begin
+      automatic logic signed [ROUNDED_WIDTH-1:0] r = s3a_sum >>> s3a_shift;
       if (r > ROUNDED_WIDTH'(SAT_MAX)) s3_r <= SAT_MAX;
       else if (r < ROUNDED_WIDTH'(SAT_MIN)) s3_r <= SAT_MIN;
       else s3_r <= r[9:0];
-      s3_zp <= d_zp[MUL_STAGES-1];
-      s3_lo <= d_lo[MUL_STAGES-1];
-      s3_hi <= d_hi[MUL_STAGES-1];
+      s3_zp   <= s3a_zp;
+      s3_lo_m <= 9'(s3a_lo) - 9'(s3a_zp);
+      s3_hi_m <= 9'(s3a_hi) - 9'(s3a_zp);
     end
 
-  // Stage 4: + zp on 11 bits, then max with act_min and min with act_max.
+  // Stage 4: y = r + zp clamped to [act_min, act_max] is act_min where r < act_min - zp, act_max where r > act_max - zp, else r + zp on
+  // 11 bits (the same integers as adding first: no term exceeds 10 bits).
   always_ff @(posedge clk_i)
     if (s3_v) begin
-      automatic logic signed [10:0] y = 11'(s3_r) + 11'(s3_zp);
-      if (y < 11'(s3_lo)) y = 11'(s3_lo);
-      if (y > 11'(s3_hi)) y = 11'(s3_hi);
-      result_o <= y[7:0];
+      automatic logic signed [9:0] y = s3_r;  // every case below fits int8: lo_m + zp = act_min, hi_m + zp = act_max, else r + zp in between
+      if (s3_r < 10'(s3_lo_m)) y = 10'(s3_lo_m);
+      if (s3_r > 10'(s3_hi_m)) y = 10'(s3_hi_m);
+      result_o <= 8'(y + 10'(s3_zp));
     end
 
 `ifndef SYNTHESIS

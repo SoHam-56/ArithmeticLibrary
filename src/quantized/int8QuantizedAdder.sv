@@ -33,7 +33,8 @@ module int8QuantizedAdder (
   logic [MANTISSA_WIDTH-1:0] s1_m1, s1_m2;
   logic [5:0] s1_shift, s3_shift, s4_shift;
   logic [ROUNDED_WIDTH-1:0] s1_half, s3_half;  // 2^(shift - 1), 0 at shift 0
-  logic signed [7:0] s1_zpo, s1_lo, s1_hi, s3_zpo, s3_lo, s3_hi, s4_zpo, s4_lo, s4_hi, s5_zpo, s5_lo, s5_hi;
+  logic signed [7:0] s1_zpo, s1_lo, s1_hi, s3_zpo, s3_lo, s3_hi, s4_zpo, s4_lo, s4_hi, s5_zpo;
+  logic signed [8:0] s5_lo_m, s5_hi_m;  // the clamp bounds less zpo: r is clamped against them, then zpo is added
   // Beside the products: the shift, its half, zpo and the clamp.
   logic [5:0] d_shift[MUL_STAGES];
   logic [ROUNDED_WIDTH-1:0] d_half[MUL_STAGES];
@@ -122,18 +123,19 @@ module int8QuantizedAdder (
       if (r > ROUNDED_WIDTH'(SAT_MAX)) s5_r <= SAT_MAX;
       else if (r < ROUNDED_WIDTH'(SAT_MIN)) s5_r <= SAT_MIN;
       else s5_r <= r[9:0];
-      s5_zpo <= s4_zpo;
-      s5_lo  <= s4_lo;
-      s5_hi  <= s4_hi;
+      s5_zpo  <= s4_zpo;
+      s5_lo_m <= 9'(s4_lo) - 9'(s4_zpo);
+      s5_hi_m <= 9'(s4_hi) - 9'(s4_zpo);
     end
 
-  // Stage 6: + zpo on 11 bits, then max with act_min and min with act_max.
+  // Stage 6: y = r + zpo clamped to [act_min, act_max] is act_min where r < act_min - zpo, act_max where r > act_max - zpo, else r + zpo
+  // on 11 bits (the same integers as adding first: no term exceeds 10 bits); the compares run beside the add instead of after it.
   always_ff @(posedge clk_i)
     if (v5) begin
-      automatic logic signed [10:0] y = 11'(s5_r) + 11'(s5_zpo);
-      if (y < 11'(s5_lo)) y = 11'(s5_lo);
-      if (y > 11'(s5_hi)) y = 11'(s5_hi);
-      result_o <= y[7:0];
+      automatic logic signed [9:0] y = s5_r;  // every case below fits int8: lo_m + zpo = act_min, hi_m + zpo = act_max, else r + zpo in between
+      if (s5_r < 10'(s5_lo_m)) y = 10'(s5_lo_m);
+      if (s5_r > 10'(s5_hi_m)) y = 10'(s5_hi_m);
+      result_o <= 8'(y + 10'(s5_zpo));
     end
 
   assign unused_wide = ^{s2_w1[PRODUCT_WIDTH], s2_w2[PRODUCT_WIDTH], p2_v};

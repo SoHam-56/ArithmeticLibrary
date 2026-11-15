@@ -45,13 +45,13 @@ package sienna_fmt_pkg;
   localparam int ACTIVATION_DATA_WIDTH = 16;  // lane arithmetic in Q4.11
   localparam int MUL_LATENCY = 2;  // mesh product: int8Multiplier (intMulPipe, two stages)
   localparam int ADD_LATENCY = 1;  // fmt_add: int32Adder
-  localparam int LANE_MUL_LATENCY = 2;  // lane multiply: GPNAE's int16Multiplier (intMulPipe, two stages)
+  localparam int LANE_MUL_LATENCY = 3;  // lane multiply: GPNAE's int16Multiplier (intMulPipe, three stages: the 16-row tree registered halfway)
   localparam int POST_MUL_LATENCY = 3;  // gpnae_post's int24Multiplier (intMulPipe, three stages)
   localparam int LANE_ADD_LATENCY = 0;  // no lane add in int8: fmt_add is int32Adder only
-  localparam int ACT_IN_LATENCY = 6;  // gpnae_act_in: LANE_MUL_LATENCY + 4: the rescale product, then round, saturate, classify, base
-  localparam int HORNER_STEP_LATENCY = 4;  // one register, then GPNAE's fixedPointMultiplyAdd, 3 cycles (the product over two)
-  localparam int HORNER_COEFFICIENT_LAG = 3;  // c_i is sampled three cycles after valid_i, in fixedPointMultiplyAdd's add stage
-  localparam int REQUANT_LATENCY = 6;  // int8Requantizer: the product over three stages
+  localparam int ACT_IN_LATENCY = 8;  // gpnae_act_in: LANE_MUL_LATENCY + 5: q - z_in registered, the rescale product, then round, saturate, classify, base
+  localparam int HORNER_STEP_LATENCY = 5;  // one register, then GPNAE's fixedPointMultiplyAdd, 4 cycles (the product over three)
+  localparam int HORNER_COEFFICIENT_LAG = 4;  // c_i is sampled four cycles after valid_i, in fixedPointMultiplyAdd's add stage
+  localparam int REQUANT_LATENCY = 7;  // int8Requantizer: the product over three stages, the rounding add and the shift on their own
   localparam int QUANT_ADD_LATENCY = 7;  // int8QuantizedAdder: the products over two stages
   localparam int DROPOUT_SCALE_LATENCY = 0;  // dropout keeps x: the 1/keep factor is in the next layer's scale
   localparam logic [DATA_WIDTH-1:0] LOWEST_VALUE = 8'h80;  // -128
@@ -116,16 +116,16 @@ package sienna_fmt_pkg;
   localparam int BIAS_DATA_WIDTH = 16;
   localparam int ACTIVATION_DATA_WIDTH = 16;
   localparam int MUL_LATENCY = 3;  // bf16WideMultiplier
-  localparam int ADD_LATENCY = 5;  // fp32Adder
+  localparam int ADD_LATENCY = 7;  // fp32Adder: seven stages (the compare and the result mux on their own)
   localparam int LANE_MUL_LATENCY = 3;  // bf16Multiplier
   localparam int POST_MUL_LATENCY = 3;  // the float post multiply is the lane multiply
-  localparam int LANE_ADD_LATENCY = 5;  // bf16Adder
-  localparam int ACT_IN_LATENCY = 4;  // gpnae_act_in: LANE_MUL_LATENCY + 1, the class rides beside the operand multiply
-  localparam int HORNER_STEP_LATENCY = 8;  // LANE_MUL_LATENCY + LANE_ADD_LATENCY
+  localparam int LANE_ADD_LATENCY = 6;  // bf16Adder: the result mux on its own stage
+  localparam int ACT_IN_LATENCY = 5;  // gpnae_act_in: LANE_MUL_LATENCY + 2, the class rides beside the operand multiply, the operand registered before its mux
+  localparam int HORNER_STEP_LATENCY = 9;  // LANE_MUL_LATENCY + LANE_ADD_LATENCY
   localparam int HORNER_COEFFICIENT_LAG = 3;  // the add issues as the product lands
   localparam int REQUANT_LATENCY = 0;
   localparam int QUANT_ADD_LATENCY = 0;
-  localparam int DROPOUT_SCALE_LATENCY = 3;  // x * 2.0 on bf16Multiplier
+  localparam int DROPOUT_SCALE_LATENCY = 1;  // x * 2.0 is an exponent increment in dropout (one register), the multiplier's words
   localparam logic [DATA_WIDTH-1:0] LOWEST_VALUE = 16'hFF80;  // -Inf
   localparam logic [DATA_WIDTH-1:0] ONE_VALUE = 16'h3F80;
   localparam bit HAS_FLOAT_TAIL = 1'b1;  // GPNAE's negative sigmoid past its Q set runs in fp32 on the tail
@@ -148,16 +148,16 @@ package sienna_fmt_pkg;
   localparam int BIAS_DATA_WIDTH = 32;
   localparam int ACTIVATION_DATA_WIDTH = 32;
   localparam int MUL_LATENCY = 8;  // fp32Multiplier: Karatsuba product
-  localparam int ADD_LATENCY = 5;
+  localparam int ADD_LATENCY = 7;  // fp32Adder: seven stages (the compare and the result mux on their own)
   localparam int LANE_MUL_LATENCY = 8;
   localparam int POST_MUL_LATENCY = 8;  // the float post multiply is the lane multiply
-  localparam int LANE_ADD_LATENCY = 5;
-  localparam int ACT_IN_LATENCY = 9;  // gpnae_act_in: LANE_MUL_LATENCY + 1, the class rides beside the operand multiply
-  localparam int HORNER_STEP_LATENCY = 13;
+  localparam int LANE_ADD_LATENCY = 7;  // fp32Adder
+  localparam int ACT_IN_LATENCY = 10;  // gpnae_act_in: LANE_MUL_LATENCY + 2, the class rides beside the operand multiply, the operand registered before its split and mux
+  localparam int HORNER_STEP_LATENCY = 15;  // LANE_MUL_LATENCY + LANE_ADD_LATENCY
   localparam int HORNER_COEFFICIENT_LAG = 8;
   localparam int REQUANT_LATENCY = 0;
   localparam int QUANT_ADD_LATENCY = 0;
-  localparam int DROPOUT_SCALE_LATENCY = 8;
+  localparam int DROPOUT_SCALE_LATENCY = 1;  // x * 2.0 is an exponent increment in dropout (one register), the multiplier's words
   localparam logic [DATA_WIDTH-1:0] LOWEST_VALUE = 32'hFF800000;
   localparam logic [DATA_WIDTH-1:0] ONE_VALUE = 32'h3F800000;
   localparam bit HAS_FLOAT_TAIL = 1'b0;  // GPNAE's negative sigmoid runs on the barrel MAC: no tail
@@ -178,7 +178,9 @@ package sienna_fmt_pkg;
 
   // fmt_mul's latency from data_width into ext_data_width bits: the mesh product (into ACC_DATA_WIDTH) takes MUL_LATENCY, a lane product LANE_MUL_LATENCY.
   function automatic int mul_latency(input int data_width, input int ext_data_width);
-    return (ext_data_width == ACC_DATA_WIDTH && data_width != ACC_DATA_WIDTH) ? MUL_LATENCY : LANE_MUL_LATENCY;
+    // int8's fmt_mul is int8Multiplier at every EXT_DATA_WIDTH (LANE_MUL_LATENCY is int16Multiplier, which the lane instantiates itself);
+    // a float's is the widening multiplier into ACC_DATA_WIDTH, else the lane multiplier.
+    return (HAS_REQUANT_EPILOGUE || (ext_data_width == ACC_DATA_WIDTH && data_width != ACC_DATA_WIDTH)) ? MUL_LATENCY : LANE_MUL_LATENCY;
   endfunction
 
   // a > b, the compare Maxpool_2D keeps: floats sign-magnitude with +0 equal to -0; int8 signed codes.

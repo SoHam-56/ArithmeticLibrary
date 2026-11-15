@@ -12,7 +12,7 @@ module int16Multiplier #(
     output logic signed [2*DATA_WIDTH-1:0] result_o,
     output logic                  done_o
 );
-  intMulPipe #(.AW(DATA_WIDTH), .BW(DATA_WIDTH), .STAGES(2)) u (
+  intMulPipe #(.AW(DATA_WIDTH), .BW(DATA_WIDTH), .STAGES(3)) u (
       .clk_i(clk_i), .rstn_i(rstn_i), .valid_i(valid_i), .a_i(a_i), .b_i(b_i), .result_o(result_o), .done_o(done_o));
 
 endmodule
