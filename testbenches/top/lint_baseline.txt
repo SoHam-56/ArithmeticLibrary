@@ -1,17 +1,17 @@
 # point|warning|file|line|message: the existing files' -Wall warnings each Fmt point's lint may keep (recorded on unchanged files)
 #sha256|src/adders/LZC.sv|f83d518ff8f6e652
-#sha256|src/adders/fp32Adder.sv|4408785e55079ced
+#sha256|src/adders/fp32Adder.sv|99dbf5e084748b0f
 #sha256|src/fmt/sienna_fmt_pkg.sv|4227ed8f439bebfd
 #sha256|src/multipliers/R4Booth.sv|50af840e9ff853a4
 #sha256|src/multipliers/fp32Multiplier.sv|1f0acade4e54bf77
 #sha256|src/multipliers/karatsubaUnsigned.sv|1b4e2946a0727ed9
 add_bf16|DECLFILENAME|src/adders/LZC.sv|3|Filename 'LZC' does not match MODULE name: 'cntlz28'
-add_bf16|WIDTHEXPAND|src/adders/fp32Adder.sv|241|Operator ASSIGN expects 9 bits on the Assign RHS, but Assign RHS's SEL generates 8 bits.
-add_bf16|WIDTHEXPAND|src/adders/fp32Adder.sv|248|Operator ASSIGN expects 9 bits on the Assign RHS, but Assign RHS's SEL generates 8 bits.
+add_bf16|WIDTHEXPAND|src/adders/fp32Adder.sv|240|Operator ASSIGN expects 9 bits on the Assign RHS, but Assign RHS's SEL generates 8 bits.
+add_bf16|WIDTHEXPAND|src/adders/fp32Adder.sv|247|Operator ASSIGN expects 9 bits on the Assign RHS, but Assign RHS's SEL generates 8 bits.
 add_bf16_w16|DECLFILENAME|src/adders/LZC.sv|3|Filename 'LZC' does not match MODULE name: 'cntlz28'
 add_fp32|DECLFILENAME|src/adders/LZC.sv|3|Filename 'LZC' does not match MODULE name: 'cntlz28'
-add_fp32|WIDTHEXPAND|src/adders/fp32Adder.sv|241|Operator ASSIGN expects 9 bits on the Assign RHS, but Assign RHS's SEL generates 8 bits.
-add_fp32|WIDTHEXPAND|src/adders/fp32Adder.sv|248|Operator ASSIGN expects 9 bits on the Assign RHS, but Assign RHS's SEL generates 8 bits.
+add_fp32|WIDTHEXPAND|src/adders/fp32Adder.sv|240|Operator ASSIGN expects 9 bits on the Assign RHS, but Assign RHS's SEL generates 8 bits.
+add_fp32|WIDTHEXPAND|src/adders/fp32Adder.sv|247|Operator ASSIGN expects 9 bits on the Assign RHS, but Assign RHS's SEL generates 8 bits.
 add_int8|DECLFILENAME|src/adders/LZC.sv|3|Filename 'LZC' does not match MODULE name: 'cntlz28'
 cmp_bf16|DECLFILENAME|src/adders/LZC.sv|3|Filename 'LZC' does not match MODULE name: 'cntlz28'
 cmp_fp32|DECLFILENAME|src/adders/LZC.sv|3|Filename 'LZC' does not match MODULE name: 'cntlz28'
