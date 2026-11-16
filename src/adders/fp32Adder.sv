@@ -34,7 +34,7 @@ module fp32Adder (
   logic        s0_hidden_a, s0_hidden_b;
   logic        s0_a_nan, s0_b_nan, s0_a_inf, s0_b_inf, s0_a_zero, s0_b_zero, s0_a_snan, s0_b_snan;
   logic        s0_op_sub;
-  logic        s0_e_gt, s0_e_eq, s0_m_ge;  // ea > eb, ea == eb, ma >= mb: the magnitude compare in two halves, joined in stage 1
+  logic        s0_e_gt, s0_e_eq, s0_m_ge;  // ea > eb, ea == eb, raw ma >= raw mb: the magnitude compare in parts, joined in stage 1
   logic [7:0]  s0_dab, s0_dba;  // ea - eb, eb - ea
   // Stage 1: the operands ordered by magnitude, their exponent difference, the class.
   logic sa, sb;
@@ -116,13 +116,12 @@ module fp32Adder (
 
     op_sub_wire = sa ^ sb;
 
-    // Compare Magnitude: {ea, ma} >= {eb, mb} as two short compares, registered apart and joined in stage 1 (the 31-bit compare
-    // into the stage-0 register was 1.04 ns at 45 nm).
+    // {ea, ma} >= {eb, mb} in parts joined in stage 1; m_ge is raw (it counts only at ea == eb, and ea == eb == 0 is a_zero): the flush into it was 1.27 ns.
     e_gt = ea > eb;
     e_eq = ea == eb;
-    m_ge = ma >= mb;
+    m_ge = ma_raw >= mb_raw;
   end
-  assign comp_a_ge_b = s0_e_gt || (s0_e_eq && s0_m_ge);
+  assign comp_a_ge_b = s0_e_gt || (s0_e_eq && (s0_a_zero || s0_m_ge));
 
   // Stage 0: the unpacked operands, their classes, the compare and both differences.
   always_ff @(posedge clk_i or negedge rstn_i)
