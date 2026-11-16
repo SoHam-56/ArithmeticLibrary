@@ -1,9 +1,10 @@
 `timescale 1ns / 100ps
 
-// Affine int8 requantize: y = clamp(sat10(floor((acc * mult + 2^(shift - 1)) / 2^shift)) + zp, act_min, act_max), 7 stages: the product
+// Affine int8 requantize: y = clamp(sat10(floor((acc * mult + 2^(shift - 1)) / 2^shift)) + zp, act_min, act_max), 9 stages: the product
 // takes three on intMulPipe (one row per mantissa bit, the carry-save tree registered halfway, one add), since the 32 x 24 product in one
-// cycle, and then in two halves, was the int8 build's worst path; the rounding add and the shift take one each (the 57-bit add into the
-// barrel shift was the next); the last stage compares the shifted value with the clamp bounds less zp, beside its add of zp.
+// cycle, and then in two halves, was the int8 build's worst path; the rounding add, the shift and the 10-bit saturation take one each (the
+// 57-bit add into the barrel shift, then the shift into the saturate, were the next); the clamp compares and the add of zp run side by side
+// on one stage, and the last stage only selects (the compare into the select into the add was 1.17 ns at 45 nm).
 module int8Requantizer (
     input  logic               clk_i,
     input  logic               rstn_i,
@@ -24,15 +25,16 @@ module int8Requantizer (
   localparam logic signed [9:0] SAT_MIN = -10'sd512;
   localparam int MUL_STAGES = 3;
 
-  logic s1_v, p_v, s3a_v, s3_v;
+  logic s1_v, p_v, s3a_v, s3b_v, s3_v, s4_v;
   logic [MUL_STAGES-1:0] pv;  // the product's stages
   logic signed [31:0] s1_acc;
   logic [MANTISSA_WIDTH-1:0] s1_mult;
   logic [5:0] s1_shift;
-  logic signed [7:0] s1_zp, s1_lo, s1_hi, s3a_zp, s3a_lo, s3a_hi, s3_zp;
+  logic signed [7:0] s1_zp, s1_lo, s1_hi, s3a_zp, s3a_lo, s3a_hi, s3b_zp, s3b_lo, s3b_hi, s3_zp, s3_lo, s3_hi;
   logic [5:0] s3a_shift;
   logic signed [ROUNDED_WIDTH-1:0] s3a_sum;  // the product plus half
-  logic signed [8:0] s3_lo_m, s3_hi_m;  // the clamp bounds less zp: r is clamped against them, then zp is added
+  logic signed [ROUNDED_WIDTH-1:0] s3b_r;  // the rounded product shifted, before the saturation
+  logic signed [8:0] s3_lo_m, s3_hi_m;  // the clamp bounds less zp: r is compared against them, then zp is added
   logic [ROUNDED_WIDTH-1:0] s1_half;  // 2^(shift - 1), 0 at shift 0
   // Beside the product: the shift, its half, zp and the clamp.
   logic [5:0] d_shift[MUL_STAGES];
@@ -41,6 +43,8 @@ module int8Requantizer (
   logic signed [PRODUCT_WIDTH:0] s2_wide;  // the product with one more sign bit
   logic signed [PRODUCT_WIDTH-1:0] s2_prod;
   logic signed [9:0] s3_r;  // the rounded, shifted product saturated to 10 bits
+  logic s4_lt, s4_gt;  // r below act_min - zp, above act_max - zp
+  logic [7:0] s4_sum, s4_lo, s4_hi;  // r + zp, act_min, act_max: the three results the last stage selects between
   /* verilator lint_off UNUSEDSIGNAL */
   logic unused_wide;  // the product's extra sign bit
   /* verilator lint_on UNUSEDSIGNAL */
@@ -50,14 +54,18 @@ module int8Requantizer (
       s1_v   <= 1'b0;
       pv     <= '0;
       s3a_v  <= 1'b0;
+      s3b_v  <= 1'b0;
       s3_v   <= 1'b0;
+      s4_v   <= 1'b0;
       done_o <= 1'b0;
     end else begin
       s1_v   <= valid_i;
       pv     <= {pv[MUL_STAGES-2:0], s1_v};
       s3a_v  <= p_v;
-      s3_v   <= s3a_v;
-      done_o <= s3_v;
+      s3b_v  <= s3a_v;
+      s3_v   <= s3b_v;
+      s4_v   <= s3_v;
+      done_o <= s4_v;
     end
   end
 
@@ -105,27 +113,42 @@ module int8Requantizer (
       s3a_hi    <= d_hi[MUL_STAGES-1];
     end
 
-  // Stage 3b: arithmetic right shift (floor), saturate to 10 bits; the clamp bounds less zp, so the last stage compares as it adds.
+  // Stage 3b: arithmetic right shift (floor).
   always_ff @(posedge clk_i)
     if (s3a_v) begin
-      automatic logic signed [ROUNDED_WIDTH-1:0] r = s3a_sum >>> s3a_shift;
-      if (r > ROUNDED_WIDTH'(SAT_MAX)) s3_r <= SAT_MAX;
-      else if (r < ROUNDED_WIDTH'(SAT_MIN)) s3_r <= SAT_MIN;
-      else s3_r <= r[9:0];
-      s3_zp   <= s3a_zp;
-      s3_lo_m <= 9'(s3a_lo) - 9'(s3a_zp);
-      s3_hi_m <= 9'(s3a_hi) - 9'(s3a_zp);
+      s3b_r  <= s3a_sum >>> s3a_shift;
+      s3b_zp <= s3a_zp;
+      s3b_lo <= s3a_lo;
+      s3b_hi <= s3a_hi;
     end
 
-  // Stage 4: y = r + zp clamped to [act_min, act_max] is act_min where r < act_min - zp, act_max where r > act_max - zp, else r + zp on
-  // 11 bits (the same integers as adding first: no term exceeds 10 bits).
+  // Stage 3c: saturate to 10 bits; the clamp bounds less zp, so the next stage compares as it adds.
+  always_ff @(posedge clk_i)
+    if (s3b_v) begin
+      if (s3b_r > ROUNDED_WIDTH'(SAT_MAX)) s3_r <= SAT_MAX;
+      else if (s3b_r < ROUNDED_WIDTH'(SAT_MIN)) s3_r <= SAT_MIN;
+      else s3_r <= s3b_r[9:0];
+      s3_zp   <= s3b_zp;
+      s3_lo   <= s3b_lo;
+      s3_hi   <= s3b_hi;
+      s3_lo_m <= 9'(s3b_lo) - 9'(s3b_zp);
+      s3_hi_m <= 9'(s3b_hi) - 9'(s3b_zp);
+    end
+
+  // Stage 4: the clamp compares beside the add of zp: y = r + zp clamped to [act_min, act_max] is act_min where r < act_min - zp, act_max
+  // where r > act_max - zp, else r + zp (the same integers as adding first: no term exceeds 10 bits, and every case fits int8).
   always_ff @(posedge clk_i)
     if (s3_v) begin
-      automatic logic signed [9:0] y = s3_r;  // every case below fits int8: lo_m + zp = act_min, hi_m + zp = act_max, else r + zp in between
-      if (s3_r < 10'(s3_lo_m)) y = 10'(s3_lo_m);
-      if (s3_r > 10'(s3_hi_m)) y = 10'(s3_hi_m);
-      result_o <= 8'(y + 10'(s3_zp));
+      s4_lt  <= s3_r < 10'(s3_lo_m);
+      s4_gt  <= s3_r > 10'(s3_hi_m);
+      s4_sum <= 8'(10'(s3_r) + 10'(s3_zp));
+      s4_lo  <= s3_lo;
+      s4_hi  <= s3_hi;
     end
+
+  // Stage 5: the select, act_max first as the clamp's second test overrode its first.
+  always_ff @(posedge clk_i)
+    if (s4_v) result_o <= s4_gt ? s4_hi : (s4_lt ? s4_lo : s4_sum);
 
 `ifndef SYNTHESIS
   localparam int MAX_SHIFT = MANTISSA_WIDTH + 31;  // the encoder's largest shift (scales down to 2^-32)

@@ -33,7 +33,8 @@ module fp32Adder (
   logic [22:0] s0_ma, s0_mb;
   logic        s0_hidden_a, s0_hidden_b;
   logic        s0_a_nan, s0_b_nan, s0_a_inf, s0_b_inf, s0_a_zero, s0_b_zero, s0_a_snan, s0_b_snan;
-  logic        s0_op_sub, s0_comp_a_ge_b;
+  logic        s0_op_sub;
+  logic        s0_e_gt, s0_e_eq, s0_m_ge;  // ea > eb, ea == eb, ma >= mb: the magnitude compare in two halves, joined in stage 1
   logic [7:0]  s0_dab, s0_dba;  // ea - eb, eb - ea
   // Stage 1: the operands ordered by magnitude, their exponent difference, the class.
   logic sa, sb;
@@ -44,15 +45,16 @@ module fp32Adder (
   logic a_nan, b_nan, a_inf, b_inf, a_zero, b_zero;
   logic a_snan, b_snan;  // New signals for SNaN detection
   logic op_sub_wire;
-  logic comp_a_ge_b;
+  logic e_gt, e_eq, m_ge;
+  logic comp_a_ge_b;  // stage 1: from the stage-0 halves
   logic       s1_valid;
   logic [7:0] s1_diff;
   logic [23:0] s1_man_big, s1_man_small;
   meta_t s1_meta;
-  // Stage 2: the aligned significands.
+  // Stage 2: the aligned significands, the small one complemented for a subtract (the op_sub select into the 28-bit add was 1.04 ns at 45 nm).
   logic         s2_valid;
   logic  [26:0] s2_man_big;
-  logic  [26:0] s2_man_small;
+  logic  [26:0] s2_man_small;  // ~small on a subtract: stage 3 adds it with op_sub as the carry in
   meta_t        s2_meta;
   // Stage 3: the sum.
   logic         s3_valid;
@@ -62,6 +64,7 @@ module fp32Adder (
   logic         s4_valid;
   logic  [27:0] s4_sum;
   logic  [ 4:0] s4_lzc;
+  logic  [ 8:0] s4_e1;  // exp + 1: the carry case's exponent, and exp - (lzc - 1) is e1 - lzc, one subtract instead of a decrement into one
   meta_t        s4_meta;
   logic  [ 4:0] lzc_module_out;
   // Stage 5: the normalized mantissa and exponent, registered (the leading-zero shift and the exponent subtract into the result mux was the
@@ -113,10 +116,13 @@ module fp32Adder (
 
     op_sub_wire = sa ^ sb;
 
-    // Compare Magnitude
-    if ({ea, ma} >= {eb, mb}) comp_a_ge_b = 1'b1;
-    else comp_a_ge_b = 1'b0;
+    // Compare Magnitude: {ea, ma} >= {eb, mb} as two short compares, registered apart and joined in stage 1 (the 31-bit compare
+    // into the stage-0 register was 1.04 ns at 45 nm).
+    e_gt = ea > eb;
+    e_eq = ea == eb;
+    m_ge = ma >= mb;
   end
+  assign comp_a_ge_b = s0_e_gt || (s0_e_eq && s0_m_ge);
 
   // Stage 0: the unpacked operands, their classes, the compare and both differences.
   always_ff @(posedge clk_i or negedge rstn_i)
@@ -128,7 +134,7 @@ module fp32Adder (
       {s0_hidden_a, s0_hidden_b} <= {hidden_a, hidden_b};
       {s0_a_nan, s0_b_nan, s0_a_inf, s0_b_inf, s0_a_zero, s0_b_zero, s0_a_snan, s0_b_snan} <= {a_nan, b_nan, a_inf, b_inf, a_zero, b_zero, a_snan, b_snan};
       s0_op_sub      <= op_sub_wire;
-      s0_comp_a_ge_b <= comp_a_ge_b;
+      {s0_e_gt, s0_e_eq, s0_m_ge} <= {e_gt, e_eq, m_ge};
       s0_dab         <= ea - eb;
       s0_dba         <= eb - ea;
     end
@@ -159,7 +165,7 @@ module fp32Adder (
         s1_meta.pure_bypass   <= (s0_a_zero ^ s0_b_zero);
         s1_meta.op_sub        <= s0_op_sub;
 
-        if (s0_comp_a_ge_b) begin
+        if (comp_a_ge_b) begin
           s1_man_big   <= {s0_hidden_a, s0_ma};
           s1_man_small <= {s0_hidden_b, s0_mb};
           s1_diff      <= s0_dab;
@@ -185,24 +191,24 @@ module fp32Adder (
       s2_meta    <= s1_meta;
       s2_man_big <= {s1_man_big, 3'b0};
 
-      if (s1_meta.pure_bypass) begin
-        s2_man_small <= 0;
-      end else begin
-        if (s1_diff >= 26) s2_man_small <= 27'b1;
-        else s2_man_small <= {s1_man_small, 3'b0} >> s1_diff;
+      begin
+        automatic logic [26:0] aligned_small;
+        if (s1_meta.pure_bypass) aligned_small = 0;
+        else if (s1_diff >= 26) aligned_small = 27'b1;
+        else aligned_small = {s1_man_small, 3'b0} >> s1_diff;
+        s2_man_small <= s1_meta.op_sub ? ~aligned_small : aligned_small;
       end
     end
   end
 
   // =========================================================================
-  // STAGE 3: Add/Sub
+  // STAGE 3: Add/Sub: big - small is big + ~small + 1 in 28 bits, so one add with op_sub as the carry in and the top bit
   // =========================================================================
   always_ff @(posedge clk_i) begin
     s3_valid <= s2_valid;
     if (s2_valid) begin
       s3_meta <= s2_meta;
-      if (s2_meta.op_sub) s3_sum <= {1'b0, s2_man_big} - {1'b0, s2_man_small};
-      else s3_sum <= {1'b0, s2_man_big} + {1'b0, s2_man_small};
+      s3_sum  <= {1'b0, s2_man_big} + {s2_meta.op_sub, s2_man_small} + 28'(s2_meta.op_sub);
     end
   end
 
@@ -220,6 +226,7 @@ module fp32Adder (
       s4_sum  <= s3_sum;
       s4_meta <= s3_meta;
       s4_lzc  <= lzc_module_out;
+      s4_e1   <= {1'b0, s3_meta.exp} + 9'd1;
       if (s3_sum == 0) s4_meta.is_zero <= 1'b1;
     end
   end
@@ -235,7 +242,7 @@ module fp32Adder (
     end else begin
       if (s4_sum[27]) begin
         norm_man = s4_sum >> 1;
-        norm_exp = s4_meta.exp + 1;
+        norm_exp = s4_e1;
       end else if (s4_lzc == 1) begin
         norm_man = s4_sum;
         norm_exp = s4_meta.exp;
@@ -245,7 +252,7 @@ module fp32Adder (
       end else if (s4_lzc > 1) begin
         shift_amt = s4_lzc - 1;
         norm_man  = s4_sum << shift_amt;
-        norm_exp  = s4_meta.exp - shift_amt;
+        norm_exp  = s4_e1 - {4'b0, s4_lzc};  // exp - (lzc - 1); the decrement then subtract was a 1.25 ns ripple at 45 nm
       end
     end
   end

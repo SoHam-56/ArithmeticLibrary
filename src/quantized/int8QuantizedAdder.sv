@@ -1,7 +1,9 @@
 `timescale 1ns / 100ps
 
-// Affine int8 ADD: y = clamp(sat10(floor(((q1 - zp1) m1 + (q2 - zp2) m2 + 2^(shift - 1)) / 2^shift)) + zpo, act_min, act_max), 7 stages:
-// each 9 x 32 product takes two on intMulPipe (one row per bit of q - zp, a carry-save tree, one add).
+// Affine int8 ADD: y = clamp(sat10(floor(((q1 - zp1) m1 + (q2 - zp2) m2 + 2^(shift - 1)) / 2^shift)) + zpo, act_min, act_max), 10 stages:
+// each 9 x 32 product takes two on intMulPipe (one row per bit of q - zp, a carry-save tree, one add); their 42-bit sum takes two, the low
+// 21 bits with a carry out, then the high (the one add was a 1.07 ns ripple at 45 nm); the rounding add, the shift and the 10-bit saturation
+// one each; the clamp compares run beside the add of zpo, and the last stage only selects, as int8Requantizer.
 module int8QuantizedAdder (
     input  logic               clk_i,
     input  logic               rstn_i,
@@ -22,38 +24,46 @@ module int8QuantizedAdder (
   localparam int MANTISSA_WIDTH = 32;
   localparam int PRODUCT_WIDTH = 9 + MANTISSA_WIDTH;  // (q - zp) m, exact
   localparam int SUM_WIDTH = PRODUCT_WIDTH + 1;
+  localparam int LO_W = SUM_WIDTH / 2;  // the sum's low half, added first
+  localparam int HI_W = SUM_WIDTH - LO_W;  // its high half: the products' top bits sign-extended, plus the low half's carry
   localparam int ROUNDED_WIDTH = SUM_WIDTH + 1;  // plus the rounding constant, below 2^(MAX_SHIFT - 1)
   localparam logic signed [9:0] SAT_MAX = 10'sd511;  // 10 bits hold every value an int8 zpo and clamp can tell apart
   localparam logic signed [9:0] SAT_MIN = -10'sd512;
   localparam int MUL_STAGES = 2;
 
-  logic v1, p_v, p2_v, v3, v4, v5;
+  logic v1, p_v, p2_v, v3a, v3, v4, v5a, v5, v6;
   logic [MUL_STAGES-1:0] pv;  // the products' stages
   logic signed [8:0] s1_d1, s1_d2;  // q - zp, in [-255, 255]
   logic [MANTISSA_WIDTH-1:0] s1_m1, s1_m2;
-  logic [5:0] s1_shift, s3_shift, s4_shift;
-  logic [ROUNDED_WIDTH-1:0] s1_half, s3_half;  // 2^(shift - 1), 0 at shift 0
-  logic signed [7:0] s1_zpo, s1_lo, s1_hi, s3_zpo, s3_lo, s3_hi, s4_zpo, s4_lo, s4_hi, s5_zpo;
-  logic signed [8:0] s5_lo_m, s5_hi_m;  // the clamp bounds less zpo: r is clamped against them, then zpo is added
+  logic [5:0] s1_shift, s3a_shift, s3_shift, s4_shift;
+  logic [ROUNDED_WIDTH-1:0] s1_half, s3a_half, s3_half;  // 2^(shift - 1), 0 at shift 0
+  logic signed [7:0] s1_zpo, s1_lo, s1_hi, s3a_zpo, s3a_lo, s3a_hi, s3_zpo, s3_lo, s3_hi, s4_zpo, s4_lo, s4_hi, s5a_zpo, s5a_lo, s5a_hi,
+                     s5_zpo, s5_lo, s5_hi;
+  logic signed [8:0] s5_lo_m, s5_hi_m;  // the clamp bounds less zpo: r is compared against them, then zpo is added
   // Beside the products: the shift, its half, zpo and the clamp.
   logic [5:0] d_shift[MUL_STAGES];
   logic [ROUNDED_WIDTH-1:0] d_half[MUL_STAGES];
   logic signed [7:0] d_zpo[MUL_STAGES], d_lo[MUL_STAGES], d_hi[MUL_STAGES];
   logic signed [PRODUCT_WIDTH:0] s2_w1, s2_w2;  // the products with one more sign bit
   logic signed [PRODUCT_WIDTH-1:0] s2_p1, s2_p2;
+  logic [LO_W:0] s3a_lo_sum;  // the low halves' sum with its carry
+  logic signed [HI_W-1:0] s3a_h1, s3a_h2;  // the high halves, sign-extended
   logic signed [SUM_WIDTH-1:0] s3_sum;
   logic signed [ROUNDED_WIDTH-1:0] s4_rnd;
+  logic signed [ROUNDED_WIDTH-1:0] s5a_r;  // the rounded sum shifted, before the saturation
   logic signed [9:0] s5_r;  // the rounded, shifted sum saturated to 10 bits
+  logic s6_lt, s6_gt;  // r below act_min - zpo, above act_max - zpo
+  logic [7:0] s6_sum, s6_lo, s6_hi;  // r + zpo, act_min, act_max: the three results the last stage selects between
   /* verilator lint_off UNUSEDSIGNAL */
   logic unused_wide;  // the products' extra sign bits and the second product's done, the first's
   /* verilator lint_on UNUSEDSIGNAL */
 
   always_ff @(posedge clk_i or negedge rstn_i)
-    if (!rstn_i) {v1, pv, v3, v4, v5, done_o} <= '0;
+    if (!rstn_i) {v1, pv, v3a, v3, v4, v5a, v5, v6, done_o} <= '0;
     else begin
       v1 <= valid_i;
       pv <= {pv[MUL_STAGES-2:0], v1};
-      {v3, v4, v5, done_o} <= {p_v, v3, v4, v5};
+      {v3a, v3, v4, v5a, v5, v6, done_o} <= {p_v, v3a, v3, v4, v5a, v5, v6};
     end
 
   // Stage 1: d = q - zp per input, and the rounding constant decoded from the shift.
@@ -95,15 +105,28 @@ module int8QuantizedAdder (
       end
   end
 
-  // Stage 3: their sum, exact.
+  // Stage 3a: the sum's low half with its carry out; the high halves wait, sign-extended.
   always_ff @(posedge clk_i)
     if (p_v) begin
-      s3_sum   <= SUM_WIDTH'(s2_p1) + SUM_WIDTH'(s2_p2);
-      s3_shift <= d_shift[MUL_STAGES-1];
-      s3_half  <= d_half[MUL_STAGES-1];
-      s3_zpo   <= d_zpo[MUL_STAGES-1];
-      s3_lo    <= d_lo[MUL_STAGES-1];
-      s3_hi    <= d_hi[MUL_STAGES-1];
+      s3a_lo_sum <= {1'b0, s2_p1[LO_W-1:0]} + {1'b0, s2_p2[LO_W-1:0]};
+      s3a_h1     <= HI_W'($signed(s2_p1[PRODUCT_WIDTH-1:LO_W]));
+      s3a_h2     <= HI_W'($signed(s2_p2[PRODUCT_WIDTH-1:LO_W]));
+      s3a_shift  <= d_shift[MUL_STAGES-1];
+      s3a_half   <= d_half[MUL_STAGES-1];
+      s3a_zpo    <= d_zpo[MUL_STAGES-1];
+      s3a_lo     <= d_lo[MUL_STAGES-1];
+      s3a_hi     <= d_hi[MUL_STAGES-1];
+    end
+
+  // Stage 3b: the high half plus the carry: the exact sum.
+  always_ff @(posedge clk_i)
+    if (v3a) begin
+      s3_sum   <= {s3a_h1 + s3a_h2 + HI_W'(s3a_lo_sum[LO_W]), s3a_lo_sum[LO_W-1:0]};
+      s3_shift <= s3a_shift;
+      s3_half  <= s3a_half;
+      s3_zpo   <= s3a_zpo;
+      s3_lo    <= s3a_lo;
+      s3_hi    <= s3a_hi;
     end
 
   // Stage 4: plus half, for round half up.
@@ -116,27 +139,42 @@ module int8QuantizedAdder (
       s4_hi    <= s3_hi;
     end
 
-  // Stage 5: arithmetic right shift (floor), saturated to 10 bits.
+  // Stage 5a: arithmetic right shift (floor).
   always_ff @(posedge clk_i)
     if (v4) begin
-      automatic logic signed [ROUNDED_WIDTH-1:0] r = s4_rnd >>> s4_shift;
-      if (r > ROUNDED_WIDTH'(SAT_MAX)) s5_r <= SAT_MAX;
-      else if (r < ROUNDED_WIDTH'(SAT_MIN)) s5_r <= SAT_MIN;
-      else s5_r <= r[9:0];
-      s5_zpo  <= s4_zpo;
-      s5_lo_m <= 9'(s4_lo) - 9'(s4_zpo);
-      s5_hi_m <= 9'(s4_hi) - 9'(s4_zpo);
+      s5a_r   <= s4_rnd >>> s4_shift;
+      s5a_zpo <= s4_zpo;
+      s5a_lo  <= s4_lo;
+      s5a_hi  <= s4_hi;
     end
 
-  // Stage 6: y = r + zpo clamped to [act_min, act_max] is act_min where r < act_min - zpo, act_max where r > act_max - zpo, else r + zpo
-  // on 11 bits (the same integers as adding first: no term exceeds 10 bits); the compares run beside the add instead of after it.
+  // Stage 5b: saturate to 10 bits; the clamp bounds less zpo, so the next stage compares as it adds.
+  always_ff @(posedge clk_i)
+    if (v5a) begin
+      if (s5a_r > ROUNDED_WIDTH'(SAT_MAX)) s5_r <= SAT_MAX;
+      else if (s5a_r < ROUNDED_WIDTH'(SAT_MIN)) s5_r <= SAT_MIN;
+      else s5_r <= s5a_r[9:0];
+      s5_zpo  <= s5a_zpo;
+      s5_lo   <= s5a_lo;
+      s5_hi   <= s5a_hi;
+      s5_lo_m <= 9'(s5a_lo) - 9'(s5a_zpo);
+      s5_hi_m <= 9'(s5a_hi) - 9'(s5a_zpo);
+    end
+
+  // Stage 6a: the clamp compares beside the add of zpo: y = r + zpo clamped to [act_min, act_max] is act_min where r < act_min - zpo,
+  // act_max where r > act_max - zpo, else r + zpo (the same integers as adding first: no term exceeds 10 bits, and every case fits int8).
   always_ff @(posedge clk_i)
     if (v5) begin
-      automatic logic signed [9:0] y = s5_r;  // every case below fits int8: lo_m + zpo = act_min, hi_m + zpo = act_max, else r + zpo in between
-      if (s5_r < 10'(s5_lo_m)) y = 10'(s5_lo_m);
-      if (s5_r > 10'(s5_hi_m)) y = 10'(s5_hi_m);
-      result_o <= 8'(y + 10'(s5_zpo));
+      s6_lt  <= s5_r < 10'(s5_lo_m);
+      s6_gt  <= s5_r > 10'(s5_hi_m);
+      s6_sum <= 8'(10'(s5_r) + 10'(s5_zpo));
+      s6_lo  <= s5_lo;
+      s6_hi  <= s5_hi;
     end
+
+  // Stage 6b: the select, act_max first as the clamp's second test overrode its first.
+  always_ff @(posedge clk_i)
+    if (v6) result_o <= s6_gt ? s6_hi : (s6_lt ? s6_lo : s6_sum);
 
   assign unused_wide = ^{s2_w1[PRODUCT_WIDTH], s2_w2[PRODUCT_WIDTH], p2_v};
 

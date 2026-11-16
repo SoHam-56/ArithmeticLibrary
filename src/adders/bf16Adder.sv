@@ -62,6 +62,7 @@ module bf16Adder #(
   logic s4_valid;
   logic [SUM_WIDTH-1:0] s4_sum;
   logic [LEADING_ZERO_COUNT_WIDTH-1:0] s4_leading_zeros;
+  logic [NORMALIZED_EXPONENT_WIDTH-1:0] s4_exponent_plus_one;  // the carry case's exponent; exponent - (lzc - 1) is this less lzc, one subtract
   /* verilator lint_off UNUSEDSIGNAL */  // s4_class's last field (sub) is spent by stage 4; as fpAdder
   operation_class_t s4_class;
   /* verilator lint_on UNUSEDSIGNAL */
@@ -125,19 +126,23 @@ module bf16Adder #(
     if (s1_valid) begin
       s2_class   <= s1_class;
       s2_big_significand <= {s1_big_significand, 3'b000};
-      if (s1_class.bypass) s2_small_significand <= '0;
-      else if (s1_exponent_diff >= EXPONENT_WIDTH'(SIGNIFICAND_WIDTH + 2)) s2_small_significand <= ALIGNED_WIDTH'(1);
-      else s2_small_significand <= {s1_small_significand, 3'b000} >> s1_exponent_diff;
+      begin  // the small significand complemented for a subtract: stage 3 is one add (the is_subtract select into the add was 1.13 ns at 45 nm)
+        automatic logic [ALIGNED_WIDTH-1:0] aligned_small;
+        if (s1_class.bypass) aligned_small = '0;
+        else if (s1_exponent_diff >= EXPONENT_WIDTH'(SIGNIFICAND_WIDTH + 2)) aligned_small = ALIGNED_WIDTH'(1);
+        else aligned_small = {s1_small_significand, 3'b000} >> s1_exponent_diff;
+        s2_small_significand <= s1_class.is_subtract ? ~aligned_small : aligned_small;
+      end
     end
 
-  // Stage 3: add or subtract.
+  // Stage 3: add, or subtract as big + ~small + 1 with is_subtract as the carry in and the top bit.
   always_ff @(posedge clk_i or negedge rstn_i)
     if (!rstn_i) s3_valid <= 1'b0;
     else s3_valid <= s2_valid;
   always_ff @(posedge clk_i)
     if (s2_valid) begin
       s3_class   <= s2_class;
-      s3_sum <= s2_class.is_subtract ? {1'b0, s2_big_significand} - {1'b0, s2_small_significand} : {1'b0, s2_big_significand} + {1'b0, s2_small_significand};
+      s3_sum <= {1'b0, s2_big_significand} + {s2_class.is_subtract, s2_small_significand} + SUM_WIDTH'(s2_class.is_subtract);
     end
 
   // Stage 4: count leading zeros.
@@ -149,6 +154,7 @@ module bf16Adder #(
       s4_sum <= s3_sum;
       s4_class   <= s3_class;
       s4_leading_zeros  <= leading_zero_count(s3_sum);
+      s4_exponent_plus_one <= NORMALIZED_EXPONENT_WIDTH'(s3_class.big_exponent) + NORMALIZED_EXPONENT_WIDTH'(1);
       if (s3_sum == '0) s4_class.zero <= 1'b1;
     end
 
@@ -159,14 +165,14 @@ module bf16Adder #(
     if (!s4_class.bypass) begin
       if (s4_sum[SUM_WIDTH-1]) begin
         normalized_mantissa = s4_sum >> 1;
-        normalized_exponent = NORMALIZED_EXPONENT_WIDTH'(s4_class.big_exponent) + NORMALIZED_EXPONENT_WIDTH'(1);
+        normalized_exponent = s4_exponent_plus_one;
       end else if (s4_leading_zeros == LEADING_ZERO_COUNT_WIDTH'(1)) normalized_mantissa = s4_sum;
       else if (s4_class.zero) begin
         normalized_mantissa = '0;
         normalized_exponent = '0;
       end else if (s4_leading_zeros > LEADING_ZERO_COUNT_WIDTH'(1)) begin
         normalized_mantissa = s4_sum << (s4_leading_zeros - LEADING_ZERO_COUNT_WIDTH'(1));
-        normalized_exponent = NORMALIZED_EXPONENT_WIDTH'(s4_class.big_exponent) - NORMALIZED_EXPONENT_WIDTH'(s4_leading_zeros - LEADING_ZERO_COUNT_WIDTH'(1));
+        normalized_exponent = s4_exponent_plus_one - NORMALIZED_EXPONENT_WIDTH'(s4_leading_zeros);  // exponent - (lzc - 1), one subtract
       end
     end
   end

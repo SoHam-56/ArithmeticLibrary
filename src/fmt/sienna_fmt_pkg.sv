@@ -49,10 +49,10 @@ package sienna_fmt_pkg;
   localparam int POST_MUL_LATENCY = 3;  // gpnae_post's int24Multiplier (intMulPipe, three stages)
   localparam int LANE_ADD_LATENCY = 0;  // no lane add in int8: fmt_add is int32Adder only
   localparam int ACT_IN_LATENCY = 8;  // gpnae_act_in: LANE_MUL_LATENCY + 5: q - z_in registered, the rescale product, then round, saturate, classify, base
-  localparam int HORNER_STEP_LATENCY = 5;  // one register, then GPNAE's fixedPointMultiplyAdd, 4 cycles (the product over three)
-  localparam int HORNER_COEFFICIENT_LAG = 4;  // c_i is sampled four cycles after valid_i, in fixedPointMultiplyAdd's add stage
-  localparam int REQUANT_LATENCY = 7;  // int8Requantizer: the product over three stages, the rounding add and the shift on their own
-  localparam int QUANT_ADD_LATENCY = 7;  // int8QuantizedAdder: the products over two stages
+  localparam int HORNER_STEP_LATENCY = 6;  // one register, then GPNAE's fixedPointMultiplyAdd, 5 cycles (the product over three, the shift, the add)
+  localparam int HORNER_COEFFICIENT_LAG = 5;  // c_i is sampled five cycles after valid_i, in fixedPointMultiplyAdd's add stage
+  localparam int REQUANT_LATENCY = 9;  // int8Requantizer: the product over three stages, the rounding add, the shift, the saturation and the clamp compares each on their own, then the select
+  localparam int QUANT_ADD_LATENCY = 10;  // int8QuantizedAdder: the products over two stages, their sum over two, then as the requantizer
   localparam int DROPOUT_SCALE_LATENCY = 0;  // dropout keeps x: the 1/keep factor is in the next layer's scale
   localparam logic [DATA_WIDTH-1:0] LOWEST_VALUE = 8'h80;  // -128
   localparam logic [DATA_WIDTH-1:0] ONE_VALUE = 8'h01;
@@ -152,7 +152,7 @@ package sienna_fmt_pkg;
   localparam int LANE_MUL_LATENCY = 8;
   localparam int POST_MUL_LATENCY = 8;  // the float post multiply is the lane multiply
   localparam int LANE_ADD_LATENCY = 7;  // fp32Adder
-  localparam int ACT_IN_LATENCY = 10;  // gpnae_act_in: LANE_MUL_LATENCY + 2, the class rides beside the operand multiply, the operand registered before its split and mux
+  localparam int ACT_IN_LATENCY = 11;  // gpnae_act_in: LANE_MUL_LATENCY + 3, the class rides beside the operand multiply, the operand registered, then its split, then the mux
   localparam int HORNER_STEP_LATENCY = 15;  // LANE_MUL_LATENCY + LANE_ADD_LATENCY
   localparam int HORNER_COEFFICIENT_LAG = 8;
   localparam int REQUANT_LATENCY = 0;
