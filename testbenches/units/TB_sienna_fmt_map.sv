@@ -17,11 +17,11 @@ module TB_sienna_fmt_map;
 
 `ifdef FMT_INT8
   localparam string WANT_NAME = "int8";
-  localparam int WANT[16] = '{8, 32, 32, 32, 16, 2, 1, 3, 0, 7, 7, 0, 0, 1, 1, 3};  // widths, latencies, the HAS_ flags, POST_MUL_LATENCY
+  localparam int WANT[16] = '{8, 32, 32, 32, 16, 2, 1, 3, 0, 9, 10, 0, 0, 1, 1, 3};  // widths, latencies, the HAS_ flags, POST_MUL_LATENCY
   localparam int WANT_LOWEST = 32'h80, WANT_ONE = 1;
   localparam int WANT_BITS[5] = '{67, 54, 110, 83, 30};  // lane_params_t, requant_params_t, add_params_t, lane_entry_t, requant_scale_t
   localparam int WANT_KEEP = 1;  // DROPOUT_KEEP_SCALE, unused in int8
-  localparam int WANT_LANE[4] = '{0, 7, 5, 4};  // EXPONENT_WIDTH, MANTISSA_WIDTH, HORNER_STEP_LATENCY, HORNER_COEFFICIENT_LAG
+  localparam int WANT_LANE[4] = '{0, 7, 6, 5};  // EXPONENT_WIDTH, MANTISSA_WIDTH, HORNER_STEP_LATENCY, HORNER_COEFFICIENT_LAG
 `elsif FMT_BF16
   localparam string WANT_NAME = "bf16";
   localparam int WANT[16] = '{16, 32, 16, 16, 16, 3, 7, 3, 6, 0, 0, 1, 1, 0, 0, 3};
