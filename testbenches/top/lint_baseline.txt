@@ -4,7 +4,7 @@
 #sha256|src/fmt/sienna_fmt_pkg.sv|4227ed8f439bebfd
 #sha256|src/multipliers/R4Booth.sv|50af840e9ff853a4
 #sha256|src/multipliers/fp32Multiplier.sv|1f0acade4e54bf77
-#sha256|src/multipliers/karatsubaUnsigned.sv|1b4e2946a0727ed9
+#sha256|src/multipliers/karatsubaUnsigned.sv|baab3095d12b1038
 add_bf16|DECLFILENAME|src/adders/LZC.sv|3|Filename 'LZC' does not match MODULE name: 'cntlz28'
 add_bf16|WIDTHEXPAND|src/adders/fp32Adder.sv|240|Operator ASSIGN expects 9 bits on the Assign RHS, but Assign RHS's SEL generates 8 bits.
 add_bf16|WIDTHEXPAND|src/adders/fp32Adder.sv|247|Operator ASSIGN expects 9 bits on the Assign RHS, but Assign RHS's SEL generates 8 bits.
@@ -24,10 +24,10 @@ mul_fp32|DECLFILENAME|src/adders/LZC.sv|3|Filename 'LZC' does not match MODULE n
 mul_fp32|UNUSEDSIGNAL|src/multipliers/fp32Multiplier.sv|42|Bits of signal are not used: 'raw_product'[22:0]
 mul_fp32|WIDTHEXPAND|src/multipliers/fp32Multiplier.sv|184|Operator ADD expects 3 bits on the RHS, but RHS's ARRAYSEL generates 1 bits.
 mul_fp32|WIDTHEXPAND|src/multipliers/fp32Multiplier.sv|210|Operator ADD expects 4 bits on the RHS, but RHS's ARRAYSEL generates 1 bits.
-mul_fp32|WIDTHEXPAND|src/multipliers/karatsubaUnsigned.sv|123|Operator SUB expects 26 bits on the RHS, but RHS's VARREF 'P_high_raw' generates 24 bits.
-mul_fp32|WIDTHEXPAND|src/multipliers/karatsubaUnsigned.sv|144|Operator SUB expects 26 bits on the RHS, but RHS's VARREF 'P_low_d1' generates 24 bits.
-mul_fp32|WIDTHEXPAND|src/multipliers/karatsubaUnsigned.sv|166|Operator ADD expects 48 bits on the RHS, but RHS's VARREF 'P_low_d2' generates 24 bits.
-mul_fp32|WIDTHEXPAND|src/multipliers/karatsubaUnsigned.sv|166|Operator SHIFTL expects 48 bits on the LHS, but LHS's VARREF 'middle_term_final' generates 26 bits.
+mul_fp32|WIDTHEXPAND|src/multipliers/karatsubaUnsigned.sv|134|Operator SUB expects 26 bits on the RHS, but RHS's VARREF 'P_high_raw' generates 24 bits.
+mul_fp32|WIDTHEXPAND|src/multipliers/karatsubaUnsigned.sv|155|Operator SUB expects 26 bits on the RHS, but RHS's VARREF 'P_low_d1' generates 24 bits.
+mul_fp32|WIDTHEXPAND|src/multipliers/karatsubaUnsigned.sv|177|Operator ADD expects 48 bits on the RHS, but RHS's VARREF 'P_low_d2' generates 24 bits.
+mul_fp32|WIDTHEXPAND|src/multipliers/karatsubaUnsigned.sv|177|Operator SHIFTL expects 48 bits on the LHS, but LHS's VARREF 'middle_term_final' generates 26 bits.
 mul_int8_o16|DECLFILENAME|src/adders/LZC.sv|3|Filename 'LZC' does not match MODULE name: 'cntlz28'
 mul_int8_o32|DECLFILENAME|src/adders/LZC.sv|3|Filename 'LZC' does not match MODULE name: 'cntlz28'
 narrow_bf16|DECLFILENAME|src/adders/LZC.sv|3|Filename 'LZC' does not match MODULE name: 'cntlz28'

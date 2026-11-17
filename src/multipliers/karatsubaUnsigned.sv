@@ -16,6 +16,7 @@ module karatsubaUnsigned #(
 
   localparam HALF_WIDTH = WIDTH / 2;
   localparam MID_WIDTH = HALF_WIDTH + 1;
+  localparam int LO_W = HALF_WIDTH / 2;  // the half sums split here: a short low add, and the high add for either carry
 
   // Stage 1: the halves, delayed beside the middle term's sums.
   logic [HALF_WIDTH-1:0] A_high_d, A_low_d, B_high_d, B_low_d;
@@ -35,6 +36,16 @@ module karatsubaUnsigned #(
   logic [(2*WIDTH)-1:0] P_high_shifted;
   logic [WIDTH-1:0] P_low_d2;
   logic s5_valid;
+
+  // high + low as a carry select: no carry chain longer than half a half (the 12-bit add was a 1.13 ns ripple in the bf16 lane's tail multiplier)
+  function automatic logic [MID_WIDTH-1:0] half_sum(input logic [HALF_WIDTH-1:0] h, input logic [HALF_WIDTH-1:0] l);
+    logic [LO_W:0] lo;
+    logic [HALF_WIDTH-LO_W:0] hi0, hi1;
+    lo  = {1'b0, h[LO_W-1:0]} + {1'b0, l[LO_W-1:0]};
+    hi0 = {1'b0, h[HALF_WIDTH-1:LO_W]} + {1'b0, l[HALF_WIDTH-1:LO_W]};
+    hi1 = {1'b0, h[HALF_WIDTH-1:LO_W]} + {1'b0, l[HALF_WIDTH-1:LO_W]} + 1'b1;
+    return {lo[LO_W] ? hi1 : hi0, lo[LO_W-1:0]};
+  endfunction
 
   // =========================================================================
   // Stage 1: Pre-Computation & Alignment
@@ -56,8 +67,8 @@ module karatsubaUnsigned #(
       s1_valid <= valid_i;
 
       // Path 1: Middle Term Pre-calculation (Adder)
-      sum_A <= multiplicand_i[WIDTH-1:HALF_WIDTH] + multiplicand_i[HALF_WIDTH-1:0];
-      sum_B <= multiplier_i[WIDTH-1:HALF_WIDTH] + multiplier_i[HALF_WIDTH-1:0];
+      sum_A <= half_sum(multiplicand_i[WIDTH-1:HALF_WIDTH], multiplicand_i[HALF_WIDTH-1:0]);
+      sum_B <= half_sum(multiplier_i[WIDTH-1:HALF_WIDTH], multiplier_i[HALF_WIDTH-1:0]);
 
       // Path 2: High/Low Terms (Delay only)
       // We register these simply to match the latency of the 'sum_A/sum_B' adders.
