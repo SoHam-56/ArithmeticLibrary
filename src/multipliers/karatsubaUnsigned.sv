@@ -27,8 +27,8 @@ module karatsubaUnsigned #(
   logic [WIDTH+1:0] P_middle_raw;
   logic mult_valid_out;
   logic unused_valid_1, unused_valid_2;
-  // Stage 4: the first subtraction.
-  logic [WIDTH+1:0] mid_minus_high;
+  // Stage 4: P_middle - P_high - P_low in carry-save form, mm_s + mm_c + 1 (the subtract P_middle - P_high alone was bf16's 1.17 ns ripple).
+  logic [WIDTH+1:0] mm_s, mm_c;
   logic [WIDTH-1:0] P_low_d1, P_high_d1;
   logic s4_valid;
   // Stage 5: the middle term and the shifted high part.
@@ -123,15 +123,18 @@ module karatsubaUnsigned #(
   // Karatsuba Formula: Middle_Term = P_middle - P_high - P_low
   always_ff @(posedge clk_i or negedge rstn_i) begin
     if (!rstn_i) begin
-      mid_minus_high <= '0;
+      mm_s <= '0;
+      mm_c <= '0;
       P_low_d1 <= '0;
       P_high_d1 <= '0;
       s4_valid <= '0;
     end else begin
       s4_valid <= mult_valid_out;
 
-      // Subtraction Step 1
-      mid_minus_high <= P_middle_raw - P_high_raw;
+      // Subtraction Step 1: P_middle + ~P_high + ~P_low + 2, one 3:2 level; one +1 rides in the carry word's free bit 0, the other in stage 5
+      mm_s <= P_middle_raw ^ ~(WIDTH+2)'(P_high_raw) ^ ~(WIDTH+2)'(P_low_raw);
+      mm_c <= {(P_middle_raw[WIDTH:0] & ~(WIDTH+1)'(P_high_raw)) | (P_middle_raw[WIDTH:0] & ~(WIDTH+1)'(P_low_raw)) |
+               (~(WIDTH+1)'(P_high_raw) & ~(WIDTH+1)'(P_low_raw)), 1'b1};
 
       // Pipeline balancing: Delay P_low and P_high to match subtraction latency
       P_low_d1 <= P_low_raw;
@@ -151,8 +154,8 @@ module karatsubaUnsigned #(
     end else begin
       s5_valid <= s4_valid;
 
-      // Subtraction Step 2: (P_mid - P_high) - P_low
-      middle_term_final <= mid_minus_high - P_low_d1;
+      // Subtraction Step 2: the carry-save word's one add
+      middle_term_final <= mm_s + mm_c + 1'b1;
 
       // Shift P_high by WIDTH (concatenation is free, but we register it)
       P_high_shifted <= {P_high_d1, {WIDTH{1'b0}}};
