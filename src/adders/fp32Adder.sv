@@ -1,6 +1,8 @@
 `timescale 1ns / 100ps
 
-module fp32Adder (
+module fp32Adder #(
+    parameter bit CARRY_SELECT = 1'b0  // stage 3's add as a carry select: the fp32 PE's (1.07-1.08 ns there), not the lanes' (it cost them 0.007-0.03 ns)
+) (
     input wire        clk_i,
     input wire        rstn_i,
     input wire        valid_i,
@@ -213,7 +215,8 @@ module fp32Adder (
     s3_valid <= s2_valid;
     if (s2_valid) begin
       s3_meta <= s2_meta;
-      s3_sum  <= {s3_lo[14] ? s3_hi1 : s3_hi0, s3_lo[13:0]};  // == {1'b0, big} + {op_sub, small} + op_sub
+      s3_sum  <= CARRY_SELECT ? {s3_lo[14] ? s3_hi1 : s3_hi0, s3_lo[13:0]}  // == {1'b0, big} + {op_sub, small} + op_sub
+                              : {1'b0, s2_man_big} + {s2_meta.op_sub, s2_man_small} + 28'(s2_meta.op_sub);
     end
   end
 
