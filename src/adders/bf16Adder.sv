@@ -113,7 +113,7 @@ module bf16Adder #(
         s1_class.sign   <= a_magnitude_ge_b ? a_i[DATA_WIDTH-1] : b_i[DATA_WIDTH-1];
         s1_big_significand      <= a_magnitude_ge_b ? {!zero_a, mantissa_a} : {!zero_b, mantissa_b};
         s1_small_significand    <= a_magnitude_ge_b ? {!zero_b, mantissa_b} : {!zero_a, mantissa_a};
-        s1_exponent_diff     <= a_magnitude_ge_b ? exponent_a - exponent_b : exponent_b - exponent_a;
+        s1_exponent_diff     <= (exponent_a >= exponent_b) ? exponent_a - exponent_b : exponent_b - exponent_a;  // equal exponents give 0 either way: the mantissa compare stays off this path (1.10 ns)
       end
     end
   end
