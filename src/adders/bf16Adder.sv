@@ -102,14 +102,17 @@ module bf16Adder #(
         automatic logic nan_a = (exponent_a == EXPONENT_ALL_ONES) && (a_i[MANTISSA_WIDTH-1:0] != '0), nan_b = (exponent_b == EXPONENT_ALL_ONES) && (b_i[MANTISSA_WIDTH-1:0] != '0);
         automatic logic signaling_nan_in = (nan_a && !a_i[MANTISSA_WIDTH-1]) || (nan_b && !b_i[MANTISSA_WIDTH-1]);
         automatic logic inf_minus_inf = inf_a && inf_b && (a_i[DATA_WIDTH-1] != b_i[DATA_WIDTH-1]);
-        automatic logic a_magnitude_ge_b = {exponent_a, mantissa_a} >= {exponent_b, mantissa_b};
+        // |a| >= |b| without the zero masking: equal exponents are both zero or neither, so the raw mantissas decide (1.093-1.099 ns
+        // from POSTS d_a/d_b into these stage-1 registers in the bf16 top at fe83391)
+        automatic logic a_magnitude_ge_b = (exponent_a > exponent_b) ||
+                                           ((exponent_a == exponent_b) && (zero_a || (a_i[MANTISSA_WIDTH-1:0] >= b_i[MANTISSA_WIDTH-1:0])));
         s1_class.invalid    <= inf_minus_inf || signaling_nan_in;
         s1_class.nan    <= nan_a || nan_b || inf_minus_inf;
         s1_class.inf    <= inf_a || inf_b;
         s1_class.zero   <= zero_a && zero_b;
         s1_class.bypass <= zero_a ^ zero_b;
         s1_class.is_subtract    <= a_i[DATA_WIDTH-1] ^ b_i[DATA_WIDTH-1];
-        s1_class.big_exponent    <= a_magnitude_ge_b ? exponent_a : exponent_b;
+        s1_class.big_exponent    <= (exponent_a >= exponent_b) ? exponent_a : exponent_b;  // the larger exponent: equal ones are the same
         s1_class.sign   <= a_magnitude_ge_b ? a_i[DATA_WIDTH-1] : b_i[DATA_WIDTH-1];
         s1_big_significand      <= a_magnitude_ge_b ? {!zero_a, mantissa_a} : {!zero_b, mantissa_b};
         s1_small_significand    <= a_magnitude_ge_b ? {!zero_b, mantissa_b} : {!zero_a, mantissa_a};
