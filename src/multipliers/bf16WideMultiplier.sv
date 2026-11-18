@@ -33,10 +33,33 @@ module bf16WideMultiplier #(
   // Stage 2: the significand product.
   logic s2_valid, s2_sign, s2_nan, s2_inf, s2_zero, s2_invalid;
   logic signed [11:0] s2_exp;
-  logic [PRODUCT_WIDTH-1:0] s2_significand_product;
-  // Stage 3: the normalized exponent and mantissa.
-  logic signed [11:0] normalized_exponent;
+  logic [PRODUCT_WIDTH-1:0] s2_significand_product;  // s2_product_s + s2_product_c, added in stage 3
+  logic [PRODUCT_WIDTH-1:0] s2_product_s, s2_product_c;  // the product in carry-save form (the 8x8 multiply in stage 2 was the bf16 PE's 1.02-1.03 ns)
+  // Stage 3: the normalized exponent and mantissa; the exponent and its range checks for a product below 2 (0) and from 2 (1), from s2_exp alone.
+  logic signed [11:0] exp_g[2];
+  logic ovf_g[2], unf_g[2];
+  logic [7:0] normalized_exponent;  // the exponent field; exp_g's range checks cover the rest
   logic [22:0] normalized_mantissa;
+
+  // a * b for 8-bit a and b in carry-save form {sum, carry}: sum + carry == a * b mod 2^16.
+  function automatic logic [2*PRODUCT_WIDTH-1:0] product_cs(input logic [SIGNIFICAND_WIDTH-1:0] a, input logic [SIGNIFICAND_WIDTH-1:0] b);
+    logic [PRODUCT_WIDTH-1:0] l0[8], l1[6], l2[4], l3[3];
+    for (int i = 0; i < 8; i++) l0[i] = b[i] ? (PRODUCT_WIDTH'(a) << i) : '0;
+    for (int i = 0; i < 2; i++) begin  // 8 -> 6: six through two compressors, two passed on
+      l1[2*i]   = l0[3*i] ^ l0[3*i+1] ^ l0[3*i+2];
+      l1[2*i+1] = ((l0[3*i] & l0[3*i+1]) | (l0[3*i] & l0[3*i+2]) | (l0[3*i+1] & l0[3*i+2])) << 1;
+    end
+    l1[4] = l0[6];
+    l1[5] = l0[7];
+    for (int i = 0; i < 2; i++) begin  // 6 -> 4
+      l2[2*i]   = l1[3*i] ^ l1[3*i+1] ^ l1[3*i+2];
+      l2[2*i+1] = ((l1[3*i] & l1[3*i+1]) | (l1[3*i] & l1[3*i+2]) | (l1[3*i+1] & l1[3*i+2])) << 1;
+    end
+    l3[0] = l2[0] ^ l2[1] ^ l2[2];  // 4 -> 3
+    l3[1] = ((l2[0] & l2[1]) | (l2[0] & l2[2]) | (l2[1] & l2[2])) << 1;
+    l3[2] = l2[3];
+    return {l3[0] ^ l3[1] ^ l3[2], ((l3[0] & l3[1]) | (l3[0] & l3[2]) | (l3[1] & l3[2])) << 1};  // 3 -> 2
+  endfunction
 
 `ifndef SYNTHESIS  // parameter checks; synthesis tools ignore or reject initial blocks
   initial if (PRODUCT_WIDTH > 22 || EXPONENT_WIDTH > 8) $error("bf16WideMultiplier: EXPONENT_WIDTH=%0d MANTISSA_WIDTH=%0d does not fit an exact fp32 product", EXPONENT_WIDTH, MANTISSA_WIDTH);
@@ -77,13 +100,20 @@ module bf16WideMultiplier #(
     if (s1_valid) begin
       {s2_sign, s2_nan, s2_inf, s2_zero, s2_invalid} <= {s1_sign, s1_nan, s1_inf, s1_zero, s1_invalid};
       s2_exp <= s1_exp;
-      s2_significand_product   <= PRODUCT_WIDTH'(s1_significand_a) * PRODUCT_WIDTH'(s1_significand_b);
+      {s2_product_s, s2_product_c} <= product_cs(s1_significand_a, s1_significand_b);
     end
   end
 
   // ── Stage 3: normalize (product in [1, 4)), place in fp32, handle range ──
+  assign s2_significand_product = s2_product_s + s2_product_c;
+  always_comb
+    for (int g = 0; g < 2; g++) begin
+      exp_g[g] = s2_exp + 12'(g);
+      ovf_g[g] = exp_g[g] >= 12'sd255;
+      unf_g[g] = exp_g[g] <= 12'sd0;
+    end
   always_comb begin
-    normalized_exponent = s2_exp + (s2_significand_product[PRODUCT_WIDTH-1] ? 12'sd1 : 12'sd0);
+    normalized_exponent = 8'(exp_g[s2_significand_product[PRODUCT_WIDTH-1]]);
     normalized_mantissa = s2_significand_product[PRODUCT_WIDTH-1] ? 23'({s2_significand_product[PRODUCT_WIDTH-2:0], {(24 - PRODUCT_WIDTH){1'b0}}}) : 23'({s2_significand_product[PRODUCT_WIDTH-3:0], {(25 - PRODUCT_WIDTH){1'b0}}});
   end
 
@@ -101,10 +131,10 @@ module bf16WideMultiplier #(
       if (s2_nan) result_o <= 32'h7FC00000;
       else if (s2_inf) result_o <= {s2_sign, 8'hFF, 23'd0};
       else if (s2_zero) result_o <= {s2_sign, 31'd0};
-      else if (normalized_exponent >= 12'sd255) begin
+      else if (ovf_g[s2_significand_product[PRODUCT_WIDTH-1]]) begin
         result_o   <= {s2_sign, 8'hFF, 23'd0};
         overflow_o <= 1'b1;
-      end else if (normalized_exponent <= 12'sd0) begin
+      end else if (unf_g[s2_significand_product[PRODUCT_WIDTH-1]]) begin
         result_o    <= {s2_sign, 31'd0};
         underflow_o <= 1'b1;
       end else result_o <= {s2_sign, 8'(normalized_exponent), normalized_mantissa};
