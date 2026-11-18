@@ -32,7 +32,7 @@ module intMulPipe #(
     return l;
   endfunction
   localparam int LEVELS = levels_of(ROWS);
-  localparam int L1 = (STAGES == 3) ? (LEVELS + 1) / 2 : LEVELS;  // levels before the first register
+  localparam int L1 = (STAGES == 3) ? LEVELS / 2 : LEVELS;  // levels before the first register: the fewer half, as stage 1 also makes the rows (4 of 7 there was the int8 requantizer's 1.029 ns, POSTQ s1_mult -> MUL s1_q)
   localparam int MID = rows_after(ROWS, L1);  // rows registered there (2 at STAGES 2)
 
   // One carry-save level: every three rows become a sum row and a carry row, the rest pass. The level's row counts are constants.
