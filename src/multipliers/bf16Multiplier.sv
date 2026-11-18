@@ -45,6 +45,9 @@ module bf16Multiplier #(
   // The significand product, and the class beside it.
   logic          product_valid;
   logic [PRODUCT_WIDTH-1:0] significand_product;
+  logic [PRODUCT_WIDTH-1:0] product_s, product_c;  // bf16: the product in carry-save form, added in the result stage (the 8x8 multiply in one stage was 1.055 ns)
+  logic [EXPONENT_WIDTH-1:0] exponent_g[2];  // the result exponent, the exponent overflow and the underflow for a product below 2 (0) and from 2 (1)
+  logic exponent_all_ones_g[2], exponent_underflow_g[2];
   operation_class_t class_delay[PRODUCT_LATENCY];
   operation_class_t class_at_product;
   // The range from the exponent sum, and the normalized result.
@@ -53,6 +56,26 @@ module bf16Multiplier #(
   logic [MANTISSA_WIDTH-1:0] result_mantissa;
 
   // Integer formats have their own units (int8Multiplier, int32Adder): an int8 build must never fall through to this one.
+  // a * b for 8-bit a and b in carry-save form {sum, carry}: sum + carry == a * b mod 2^16.
+  function automatic logic [2*PRODUCT_WIDTH-1:0] product_cs(input logic [SIGNIFICAND_WIDTH-1:0] a, input logic [SIGNIFICAND_WIDTH-1:0] b);
+    logic [PRODUCT_WIDTH-1:0] l0[8], l1[6], l2[4], l3[3];
+    for (int i = 0; i < 8; i++) l0[i] = b[i] ? (PRODUCT_WIDTH'(a) << i) : '0;
+    for (int i = 0; i < 2; i++) begin  // 8 -> 6: six through two compressors, two passed on
+      l1[2*i]   = l0[3*i] ^ l0[3*i+1] ^ l0[3*i+2];
+      l1[2*i+1] = ((l0[3*i] & l0[3*i+1]) | (l0[3*i] & l0[3*i+2]) | (l0[3*i+1] & l0[3*i+2])) << 1;
+    end
+    l1[4] = l0[6];
+    l1[5] = l0[7];
+    for (int i = 0; i < 2; i++) begin  // 6 -> 4
+      l2[2*i]   = l1[3*i] ^ l1[3*i+1] ^ l1[3*i+2];
+      l2[2*i+1] = ((l1[3*i] & l1[3*i+1]) | (l1[3*i] & l1[3*i+2]) | (l1[3*i+1] & l1[3*i+2])) << 1;
+    end
+    l3[0] = l2[0] ^ l2[1] ^ l2[2];  // 4 -> 3
+    l3[1] = ((l2[0] & l2[1]) | (l2[0] & l2[2]) | (l2[1] & l2[2])) << 1;
+    l3[2] = l2[3];
+    return {l3[0] ^ l3[1] ^ l3[2], ((l3[0] & l3[1]) | (l3[0] & l3[2]) | (l3[1] & l3[2])) << 1};  // 3 -> 2
+  endfunction
+
   if (EXPONENT_WIDTH < 2) begin : G_BAD_FORMAT
     $fatal(1, "bf16Multiplier: EXPONENT_WIDTH=%0d is an integer format, not a float one", EXPONENT_WIDTH);
   end
@@ -98,6 +121,20 @@ module bf16Multiplier #(
         .valid_o       (product_valid),
         .product_o     (significand_product)
     );
+  end else if (SIGNIFICAND_WIDTH == 8) begin : G_CARRY_SAVE
+    // bf16's 8x8 significand product: the eight partial products through 3:2 levels 8 -> 6 -> 4 -> 3 -> 2, registered as two words;
+    // the result stage adds them, the two normalizations made ready beside the add.
+    always_ff @(posedge clk_i or negedge rstn_i) begin
+      if (!rstn_i) begin
+        product_valid <= 1'b0;
+        product_s     <= '0;
+        product_c     <= '0;
+      end else begin
+        product_valid <= s1_valid;
+        if (s1_valid) {product_s, product_c} <= product_cs(s1_significand_a, s1_significand_b);
+      end
+    end
+    assign significand_product = product_s + product_c;
   end else begin : G_DIRECT
     always_ff @(posedge clk_i or negedge rstn_i) begin
       if (!rstn_i) begin
@@ -118,12 +155,20 @@ module bf16Multiplier #(
   assign class_at_product = class_delay[PRODUCT_LATENCY-1];
 
   // Range from the exponent sum, as fp32Multiplier's bias stage; normalize a product in [2, 4) by one place.
+  // Both normalizations' exponent, underflow and all-ones check come from the class alone, so the product's top bit only selects.
+  always_comb
+    for (int g = 0; g < 2; g++) begin
+      exponent_g[g]           = EXPONENT_WIDTH'(class_at_product.exponent_sum - EXPONENT_SUM_WIDTH'(EXPONENT_BIAS)) + EXPONENT_WIDTH'(g);
+      exponent_all_ones_g[g]  = exponent_g[g] == EXPONENT_ALL_ONES;
+      exponent_underflow_g[g] = (class_at_product.exponent_sum < EXPONENT_SUM_WIDTH'(EXPONENT_BIAS)) ||
+                                ((class_at_product.exponent_sum == EXPONENT_SUM_WIDTH'(EXPONENT_BIAS)) && (g == 0));
+    end
   always_comb begin
-    product_ge_two    = significand_product[PRODUCT_WIDTH-1];
-    exponent_overflow = (class_at_product.exponent_sum >= EXPONENT_SUM_WIDTH'(EXPONENT_INF_CODE + EXPONENT_BIAS));
-    exponent_underflow  = (class_at_product.exponent_sum < EXPONENT_SUM_WIDTH'(EXPONENT_BIAS)) || ((class_at_product.exponent_sum == EXPONENT_SUM_WIDTH'(EXPONENT_BIAS)) && !product_ge_two);
-    result_exponent   = EXPONENT_WIDTH'(class_at_product.exponent_sum - EXPONENT_SUM_WIDTH'(EXPONENT_BIAS)) + EXPONENT_WIDTH'(product_ge_two);
-    result_mantissa   = product_ge_two ? significand_product[PRODUCT_WIDTH-2-:MANTISSA_WIDTH] : significand_product[PRODUCT_WIDTH-3-:MANTISSA_WIDTH];
+    product_ge_two     = significand_product[PRODUCT_WIDTH-1];
+    exponent_overflow  = (class_at_product.exponent_sum >= EXPONENT_SUM_WIDTH'(EXPONENT_INF_CODE + EXPONENT_BIAS));
+    exponent_underflow = exponent_underflow_g[product_ge_two];
+    result_exponent    = exponent_g[product_ge_two];
+    result_mantissa    = product_ge_two ? significand_product[PRODUCT_WIDTH-2-:MANTISSA_WIDTH] : significand_product[PRODUCT_WIDTH-3-:MANTISSA_WIDTH];
   end
 
   always_ff @(posedge clk_i or negedge rstn_i) begin
@@ -149,7 +194,7 @@ module bf16Multiplier #(
         end else if (exponent_underflow) begin
           result_o    <= {class_at_product.sign, {(DATA_WIDTH - 1) {1'b0}}};
           underflow_o <= 1'b1;
-        end else if (result_exponent == EXPONENT_ALL_ONES) begin
+        end else if (exponent_all_ones_g[product_ge_two]) begin
           result_o   <= {class_at_product.sign, EXPONENT_ALL_ONES, {MANTISSA_WIDTH{1'b0}}};
           overflow_o <= 1'b1;
         end else result_o <= {class_at_product.sign, result_exponent, result_mantissa};
