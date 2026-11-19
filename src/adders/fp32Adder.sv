@@ -61,9 +61,8 @@ module fp32Adder #(
   // Stage 3: the sum.
   logic         s3_valid;
   logic  [27:0] s3_sum;
-  logic  [9:0]  s3_lo;  // stage 3 as a carry select in three: bits 0-8 with their carry, bits 9-17 and 18-27 for either carry in (the one
-  logic  [9:0]  s3_mid0, s3_mid1, s3_mid;  // 28-bit add was the fp32 PE's 1.07-1.08 ns at d82cd3c; halves at 14 bits, still 1.017-1.065 at c7eea45)
-  logic  [9:0]  s3_hi0, s3_hi1;
+  logic  [14:0] s3_lo;  // stage 3 as a carry select: the low 14 bits with their carry out, the high 14 for either carry (the one 28-bit
+  logic  [13:0] s3_hi0, s3_hi1;  // add was the fp32 PE's 1.07-1.08 ns, s2_man_big -> s3_sum, in the compile_ultra N8/N16 meshes)
   meta_t        s3_meta;
   // Stage 4: the sum and its leading zeros.
   logic         s4_valid;
@@ -205,12 +204,9 @@ module fp32Adder #(
     end
   end
 
-  assign s3_lo   = {1'b0, s2_man_big[8:0]} + {1'b0, s2_man_small[8:0]} + 10'(s2_meta.op_sub);
-  assign s3_mid0 = {1'b0, s2_man_big[17:9]} + {1'b0, s2_man_small[17:9]};
-  assign s3_mid1 = {1'b0, s2_man_big[17:9]} + {1'b0, s2_man_small[17:9]} + 10'd1;
-  assign s3_mid  = s3_lo[9] ? s3_mid1 : s3_mid0;
-  assign s3_hi0  = {1'b0, s2_man_big[26:18]} + {s2_meta.op_sub, s2_man_small[26:18]};
-  assign s3_hi1  = {1'b0, s2_man_big[26:18]} + {s2_meta.op_sub, s2_man_small[26:18]} + 10'd1;
+  assign s3_lo  = {1'b0, s2_man_big[13:0]} + {1'b0, s2_man_small[13:0]} + 15'(s2_meta.op_sub);
+  assign s3_hi0 = {1'b0, s2_man_big[26:14]} + {s2_meta.op_sub, s2_man_small[26:14]};
+  assign s3_hi1 = {1'b0, s2_man_big[26:14]} + {s2_meta.op_sub, s2_man_small[26:14]} + 14'd1;
 
   // =========================================================================
   // STAGE 3: Add/Sub: big - small is big + ~small + 1 in 28 bits, so one add with op_sub as the carry in and the top bit
@@ -219,7 +215,7 @@ module fp32Adder #(
     s3_valid <= s2_valid;
     if (s2_valid) begin
       s3_meta <= s2_meta;
-      s3_sum  <= CARRY_SELECT ? {s3_mid[9] ? s3_hi1 : s3_hi0, s3_mid[8:0], s3_lo[8:0]}  // == {1'b0, big} + {op_sub, small} + op_sub
+      s3_sum  <= CARRY_SELECT ? {s3_lo[14] ? s3_hi1 : s3_hi0, s3_lo[13:0]}  // == {1'b0, big} + {op_sub, small} + op_sub
                               : {1'b0, s2_man_big} + {s2_meta.op_sub, s2_man_small} + 28'(s2_meta.op_sub);
     end
   end
