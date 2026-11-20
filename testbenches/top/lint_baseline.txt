@@ -2,7 +2,7 @@
 #sha256|src/adders/LZC.sv|f83d518ff8f6e652
 #sha256|src/adders/fp32Adder.sv|17d2b443cc63ea56
 #sha256|src/fmt/sienna_fmt_pkg.sv|4227ed8f439bebfd
-#sha256|src/multipliers/R4Booth.sv|50af840e9ff853a4
+#sha256|src/multipliers/R4Booth.sv|887fb239f7ca64b5
 #sha256|src/multipliers/fp32Multiplier.sv|1f0acade4e54bf77
 #sha256|src/multipliers/karatsubaUnsigned.sv|966271eff8c4776e
 add_bf16|DECLFILENAME|src/adders/LZC.sv|3|Filename 'LZC' does not match MODULE name: 'cntlz28'
@@ -18,12 +18,18 @@ cmp_fp32|DECLFILENAME|src/adders/LZC.sv|3|Filename 'LZC' does not match MODULE n
 cmp_int8|DECLFILENAME|src/adders/LZC.sv|3|Filename 'LZC' does not match MODULE name: 'cntlz28'
 mul_bf16_o16|DECLFILENAME|src/adders/LZC.sv|3|Filename 'LZC' does not match MODULE name: 'cntlz28'
 mul_bf16_o32|DECLFILENAME|src/adders/LZC.sv|3|Filename 'LZC' does not match MODULE name: 'cntlz28'
-mul_fp32|BLKSEQ|src/multipliers/R4Booth.sv|50|Blocking assignment '=' in sequential logic process
+mul_fp32|BLKSEQ|src/multipliers/R4Booth.sv|51|Blocking assignment '=' in sequential logic process
+mul_fp32|BLKSEQ|src/multipliers/R4Booth.sv|54|Blocking assignment '=' in sequential logic process
+mul_fp32|BLKSEQ|src/multipliers/R4Booth.sv|55|Blocking assignment '=' in sequential logic process
+mul_fp32|BLKSEQ|src/multipliers/R4Booth.sv|56|Blocking assignment '=' in sequential logic process
+mul_fp32|BLKSEQ|src/multipliers/R4Booth.sv|57|Blocking assignment '=' in sequential logic process
+mul_fp32|BLKSEQ|src/multipliers/R4Booth.sv|58|Blocking assignment '=' in sequential logic process
+mul_fp32|BLKSEQ|src/multipliers/R4Booth.sv|59|Blocking assignment '=' in sequential logic process
 mul_fp32|BLKSEQ|src/multipliers/R4Booth.sv|60|Blocking assignment '=' in sequential logic process
+mul_fp32|BLKSEQ|src/multipliers/R4Booth.sv|61|Blocking assignment '=' in sequential logic process
+mul_fp32|BLKSEQ|src/multipliers/R4Booth.sv|62|Blocking assignment '=' in sequential logic process
 mul_fp32|DECLFILENAME|src/adders/LZC.sv|3|Filename 'LZC' does not match MODULE name: 'cntlz28'
 mul_fp32|UNUSEDSIGNAL|src/multipliers/fp32Multiplier.sv|42|Bits of signal are not used: 'raw_product'[22:0]
-mul_fp32|WIDTHEXPAND|src/multipliers/fp32Multiplier.sv|184|Operator ADD expects 3 bits on the RHS, but RHS's ARRAYSEL generates 1 bits.
-mul_fp32|WIDTHEXPAND|src/multipliers/fp32Multiplier.sv|210|Operator ADD expects 4 bits on the RHS, but RHS's ARRAYSEL generates 1 bits.
 mul_fp32|WIDTHEXPAND|src/multipliers/karatsubaUnsigned.sv|180|Operator ADD expects 48 bits on the RHS, but RHS's VARREF 'P_low_d2' generates 24 bits.
 mul_fp32|WIDTHEXPAND|src/multipliers/karatsubaUnsigned.sv|180|Operator SHIFTL expects 48 bits on the LHS, but LHS's VARREF 'middle_term_final' generates 26 bits.
 mul_int8_o16|DECLFILENAME|src/adders/LZC.sv|3|Filename 'LZC' does not match MODULE name: 'cntlz28'
