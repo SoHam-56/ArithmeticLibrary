@@ -52,6 +52,47 @@ module mem_array #(
     /* verilator lint_on UNUSEDSIGNAL */
   end
 
+`ifdef MEM_AUDIT
+  // The banking audit (simulation only, +define+MEM_AUDIT): per cycle, how many write and read ports touch each bank, for B banks by
+  // address blocks (addr / (DEPTH / B)) and by interleave (addr % B), B = 2 .. 64; the worst counts per instance are printed at the end.
+  // A banking is single-port legal where reads + writes per bank per cycle stay at 1, one-read-one-write legal where each stays at 1.
+  // Reads are counted where re_i is set; a combinational-read user that ties re_i high is counted every cycle (an upper bound).
+  localparam int NB = 6;  // B = 2, 4, 8, 16, 32, 64
+  int aw_max[2][NB], ar_max[2][NB], arw_max[2][NB];  // [block 0 / interleave 1][B index]
+  longint a_cycles, a_wr, a_rd;
+  initial begin
+    for (int m = 0; m < 2; m++) for (int b = 0; b < NB; b++) {aw_max[m][b], ar_max[m][b], arw_max[m][b]} = '0;
+    {a_cycles, a_wr, a_rd} = '0;
+  end
+  always @(posedge clk_i) begin
+    automatic int wc[64], rc[64];
+    a_cycles++;
+    for (int p = 0; p < NW; p++) a_wr += we_i[p];
+    for (int p = 0; p < NR; p++) a_rd += re_i[p];
+    for (int m = 0; m < 2; m++)
+      for (int bi = 0; bi < NB; bi++) begin
+        automatic int nb = 2 << bi;
+        automatic int blk = (DEPTH + nb - 1) / nb;
+        for (int k = 0; k < 64; k++) begin wc[k] = 0; rc[k] = 0; end
+        for (int p = 0; p < NW; p++) if (we_i[p]) wc[(m == 0) ? int'(waddr_i[p]) / blk : int'(waddr_i[p]) % nb]++;
+        for (int p = 0; p < NR; p++) if (re_i[p]) rc[(m == 0) ? int'(raddr_i[p]) / blk : int'(raddr_i[p]) % nb]++;
+        for (int k = 0; k < nb; k++) begin
+          if (wc[k] > aw_max[m][bi]) aw_max[m][bi] = wc[k];
+          if (rc[k] > ar_max[m][bi]) ar_max[m][bi] = rc[k];
+          if (wc[k] + rc[k] > arw_max[m][bi]) arw_max[m][bi] = wc[k] + rc[k];
+        end
+      end
+  end
+  final begin
+    $display("MEM_AUDIT %m DEPTH=%0d WIDTH=%0d NW=%0d NR=%0d SYNC=%0d cycles=%0d writes=%0d reads=%0d", DEPTH, WIDTH, NW, NR, SYNC_READ, a_cycles,
+             a_wr, a_rd);
+    for (int bi = 0; bi < NB; bi++)
+      if ((2 << bi) <= DEPTH)
+        $display("MEM_AUDIT %m B=%0d block w%0d r%0d rw%0d interleave w%0d r%0d rw%0d", 2 << bi, aw_max[0][bi], ar_max[0][bi], arw_max[0][bi],
+                 aw_max[1][bi], ar_max[1][bi], arw_max[1][bi]);
+  end
+`endif
+
 `ifdef SYNTHESIS
   /* verilator lint_off UNUSEDPARAM */
   localparam bit UNUSED_ZERO_INIT = ZERO_INIT;  // simulation only
