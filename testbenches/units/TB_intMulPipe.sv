@@ -6,6 +6,7 @@ module TB_intMulPipe #(
     parameter int AW     = 16,
     parameter int BW     = 16,
     parameter int STAGES = 2,
+    parameter int S1_LEVELS = -1,
     parameter int RANDOM = 20000
 );
   localparam int W = AW + BW;
@@ -17,7 +18,7 @@ module TB_intMulPipe #(
   logic signed [BW-1:0] b = '0;
   logic signed [W-1:0] res;
   logic done;
-  intMulPipe #(.AW(AW), .BW(BW), .STAGES(STAGES)) dut (
+  intMulPipe #(.AW(AW), .BW(BW), .STAGES(STAGES), .S1_LEVELS(S1_LEVELS)) dut (
       .clk_i(clk), .rstn_i(rstn), .valid_i(valid), .a_i(a), .b_i(b), .result_o(res), .done_o(done));
 
   // Expected products in issue order; checked as done_o returns them.

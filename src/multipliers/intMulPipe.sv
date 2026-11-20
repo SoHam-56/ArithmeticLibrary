@@ -7,7 +7,8 @@
 module intMulPipe #(
     parameter int AW     = 16,  // a_i's width, signed
     parameter int BW     = 16,  // b_i's width, signed: the rows
-    parameter int STAGES = 2    // 2 or 3 cycles from valid_i to done_o
+    parameter int STAGES = 2,   // 2 or 3 cycles from valid_i to done_o
+    parameter int S1_LEVELS = -1  // STAGES 3: tree levels in stage 1 (-1: half, rounded down; fewer moves the rows' fanout off a full stage)
 ) (
     input  logic                  clk_i,
     input  logic                  rstn_i,
@@ -32,7 +33,7 @@ module intMulPipe #(
     return l;
   endfunction
   localparam int LEVELS = levels_of(ROWS);
-  localparam int L1 = (STAGES == 3) ? LEVELS / 2 : LEVELS;  // levels before the first register: the fewer half, as stage 1 also makes the rows (4 of 7 there was the int8 requantizer's 1.029 ns, POSTQ s1_mult -> MUL s1_q)
+  localparam int L1 = (STAGES != 3) ? LEVELS : (S1_LEVELS >= 0) ? S1_LEVELS : LEVELS / 2;  // levels before the first register: the fewer half, as stage 1 also makes the rows (4 of 7 there was the int8 requantizer's 1.029 ns, POSTQ s1_mult -> MUL s1_q)
   localparam int MID = rows_after(ROWS, L1);  // rows registered there (2 at STAGES 2)
 
   // One carry-save level: every three rows become a sum row and a carry row, the rest pass. The level's row counts are constants.
@@ -60,6 +61,9 @@ module intMulPipe #(
 
   if (STAGES != 2 && STAGES != 3) begin : G_BAD_STAGES
     $fatal(1, "intMulPipe: STAGES %0d, 2 or 3", STAGES);
+  end
+  if (STAGES == 3 && (L1 < 1 || L1 >= LEVELS)) begin : G_BAD_S1_LEVELS
+    $fatal(1, "intMulPipe: S1_LEVELS %0d, 1 to %0d", S1_LEVELS, LEVELS - 1);
   end
   if (AW < 2 || BW < 2) begin : G_BAD_WIDTH
     $fatal(1, "intMulPipe: AW %0d and BW %0d must be at least 2", AW, BW);

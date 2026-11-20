@@ -23,7 +23,7 @@ POINTS = [  # (unit, target, need, bad, firing scan)
     ("common", "fpu", TB, TB_BAD, True), ("common", "truth", TB + (r"^truth selftest: \d+ checks, 0 failures$",), TB_BAD, True),
     ("common", "credit", (r"^credit lint: 0 warnings, 0 errors$",), (r"credit FAIL",), False),  # and CREDIT_OK 'credit OK' lines; the fault modes' lines quote the assertions they fire
     ("common", "mem", (r"^mem lint: 0 warnings, 0 errors$", r"^mem OK: 4 of 4 checks passed$"), (r"mem FAIL",), False),  # mem_array: 3 bench modes and the $fatal; the fatal's line quotes it
-    ("common", "mulpipe", (r"^mulpipe lint: 0 warnings, 0 errors$", r"^mulpipe OK: 5 of 5 shapes passed$"), (r"mulpipe FAIL",), False),  # intMulPipe in every shape the units use
+    ("common", "mulpipe", (r"^mulpipe lint: 0 warnings, 0 errors$", r"^mulpipe OK: 6 of 6 shapes passed$"), (r"mulpipe FAIL",), False),  # intMulPipe in every shape the units use
     ("fp32Adder", "verilator", (r"^SUCCESS: All \d+ vectors passed",), TB_BAD, True),
     ("intAdder", "verilator", TB, TB_BAD, True), ("intAdder", "check", TB, TB_BAD, True),
     ("intAdder", "lint", (), LINT_BAD, True),
@@ -163,7 +163,7 @@ class ArilSpec(regress.Spec):
         if t == "mem":
             need = (r"^mem lint: not applicable to VCS", r"^mem OK: 4 of 4 checks passed$")
         if t == "mulpipe":
-            need = (r"^mulpipe lint: not applicable to VCS", r"^mulpipe OK: 5 of 5 shapes passed$")
+            need = (r"^mulpipe lint: not applicable to VCS", r"^mulpipe OK: 6 of 6 shapes passed$")
         if u == "fmt" and t in FMT_POINTS:
             need = TB + (rf"^lint {t}: not applicable to VCS",)
         v = regress.marker_verdict(text, rc, need, bad, firing)
