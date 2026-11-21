@@ -31,11 +31,11 @@ module TB_sienna_fmt_map;
   localparam int WANT_LANE[4] = '{8, 7, 9, 3};
 `else
   localparam string WANT_NAME = "fp32";
-  localparam int WANT[16] = '{32, 32, 32, 32, 32, 9, 7, 9, 7, 0, 0, 1, 0, 0, 0, 9};  // fp32 has no GPNAE tail
+  localparam int WANT[16] = '{32, 32, 32, 32, 32, 9, 7, 8, 7, 0, 0, 1, 0, 0, 0, 8};  // fp32 has no GPNAE tail
   localparam int WANT_LOWEST = 32'hFF800000, WANT_ONE = 32'h3F800000;
   localparam int WANT_BITS[5] = '{1, 1, 1, 1, 1};
   localparam int WANT_KEEP = 32'h40000000;
-  localparam int WANT_LANE[4] = '{8, 23, 16, 9};
+  localparam int WANT_LANE[4] = '{8, 23, 15, 8};
 `endif
 `ifdef NO_FMT_DEFINE
   localparam int WANT_DEFINES = 0;

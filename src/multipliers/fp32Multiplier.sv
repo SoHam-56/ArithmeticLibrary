@@ -1,6 +1,8 @@
 `timescale 1ns / 100ps
 
-module fp32Multiplier (
+module fp32Multiplier #(
+    parameter int BOOTH_SUM_STAGES = 1  // the Booth multipliers' partial-product sum in one cycle, or 2 (one cycle more)
+) (
     input wire        clk_i,
     input wire        rstn_i,
     input wire        valid_i,
@@ -64,9 +66,8 @@ module fp32Multiplier (
   logic [9:0] exp_calc_result;
   // The exponent result delayed to the product.
   meta_data_t sync_data;
-  // The Booth multipliers' sum in two cycles (one 7-operand sum per cycle was the fp32 Karatsuba's limit at 0.8 ns, pp_reg -> product); the
-  // exponent side's result waits one register per sum stage, so it meets the product.
-  localparam int BOOTH_SUM_STAGES = 2;
+  // BOOTH_SUM_STAGES 2 (the mesh's multiplier, fmt_mul MESH): the Booth sums over two cycles (one 7-operand sum per cycle was the fp32
+  // Karatsuba's limit at 0.8 ns, pp_reg -> product); the exponent side's result waits one register per sum stage, so it meets the product.
   logic [$bits(meta_data_t)-1:0] delay_reg[BOOTH_SUM_STAGES];
   // The normalized result.
   logic final_is_underflow;
