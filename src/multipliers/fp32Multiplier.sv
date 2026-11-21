@@ -64,7 +64,10 @@ module fp32Multiplier (
   logic [9:0] exp_calc_result;
   // The exponent result delayed to the product.
   meta_data_t sync_data;
-  logic [$bits(meta_data_t)-1:0] delay_reg;
+  // The Booth multipliers' sum in two cycles (one 7-operand sum per cycle was the fp32 Karatsuba's limit at 0.8 ns, pp_reg -> product); the
+  // exponent side's result waits one register per sum stage, so it meets the product.
+  localparam int BOOTH_SUM_STAGES = 2;
+  logic [$bits(meta_data_t)-1:0] delay_reg[BOOTH_SUM_STAGES];
   // The normalized result.
   logic final_is_underflow;
   logic [7:0] final_exp;
@@ -132,7 +135,8 @@ module fp32Multiplier (
   end
 
   karatsubaUnsigned #(
-      .WIDTH(24)
+      .WIDTH(24),
+      .BOOTH_SUM_STAGES(BOOTH_SUM_STAGES)
   ) u_karatsuba (
       .clk_i         (clk_i),
       .rstn_i        (rstn_i),
@@ -252,7 +256,8 @@ module fp32Multiplier (
   end
 
   always_ff @(posedge clk_i) begin
-    delay_reg <= {
+    for (int d = 1; d < BOOTH_SUM_STAGES; d++) delay_reg[d] <= delay_reg[d-1];
+    delay_reg[0] <= {
       exp_calc_is_nan,
       exp_calc_is_inf,
       exp_calc_is_zero,
@@ -264,7 +269,7 @@ module fp32Multiplier (
       exp_calc_result
     };
   end
-  assign sync_data = delay_reg;
+  assign sync_data = delay_reg[BOOTH_SUM_STAGES-1];
 
   always_comb begin
     final_is_underflow = sync_data.flag_un || (sync_data.flag_pot_un && !raw_product[47]);

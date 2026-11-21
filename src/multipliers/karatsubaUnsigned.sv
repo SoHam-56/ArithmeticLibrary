@@ -1,7 +1,8 @@
 `timescale 1ns / 100ps
 
 module karatsubaUnsigned #(
-    parameter WIDTH = 24
+    parameter WIDTH = 24,
+    parameter int BOOTH_SUM_STAGES = 1  // R4Booth's SUM_STAGES: its partial products' sum in one cycle or two (valid_o follows)
 ) (
     input logic clk_i,
     input logic rstn_i,
@@ -85,7 +86,7 @@ module karatsubaUnsigned #(
   // All 3 multipliers start here. They have fixed internal latency (PIPELINE_DEPTH).
 
   // Low Part
-  R4Booth #(HALF_WIDTH) booth_low (
+  R4Booth #(.N(HALF_WIDTH), .SUM_STAGES(BOOTH_SUM_STAGES)) booth_low (
       .clk_i(clk_i),
       .rstn_i(rstn_i),
       .valid_i(s1_valid),
@@ -96,7 +97,7 @@ module karatsubaUnsigned #(
   );
 
   // High Part
-  R4Booth #(HALF_WIDTH) booth_high (
+  R4Booth #(.N(HALF_WIDTH), .SUM_STAGES(BOOTH_SUM_STAGES)) booth_high (
       .clk_i(clk_i),
       .rstn_i(rstn_i),
       .valid_i(s1_valid),
@@ -107,7 +108,7 @@ module karatsubaUnsigned #(
   );
 
   // Middle Part
-  R4Booth #(MID_WIDTH) booth_mid (
+  R4Booth #(.N(MID_WIDTH), .SUM_STAGES(BOOTH_SUM_STAGES)) booth_mid (
       .clk_i(clk_i),
       .rstn_i(rstn_i),
       .valid_i(s1_valid),
