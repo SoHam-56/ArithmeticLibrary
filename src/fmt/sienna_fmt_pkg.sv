@@ -43,7 +43,7 @@ package sienna_fmt_pkg;
   localparam int RESULT_DATA_WIDTH = 32;  // mesh result word: int32, requantized at the lane feed
   localparam int BIAS_DATA_WIDTH = 32;  // int32 bias
   localparam int ACTIVATION_DATA_WIDTH = 16;  // lane arithmetic in Q4.11
-  localparam int MUL_LATENCY = 2;  // mesh product: int8Multiplier (intMulPipe, two stages)
+  localparam int MUL_LATENCY = 4;  // mesh product: int8Multiplier (its operands registered, then intMulPipe's three stages)
   localparam int ADD_LATENCY = 1;  // fmt_add: int32Adder
   localparam int LANE_MUL_LATENCY = 3;  // lane multiply: GPNAE's int16Multiplier (intMulPipe, three stages: the 16-row tree registered halfway)
   localparam int POST_MUL_LATENCY = 3;  // gpnae_post's int24Multiplier (intMulPipe, three stages)
@@ -115,7 +115,7 @@ package sienna_fmt_pkg;
   localparam int RESULT_DATA_WIDTH = 16;  // narrowed in the mesh reducer
   localparam int BIAS_DATA_WIDTH = 16;
   localparam int ACTIVATION_DATA_WIDTH = 16;
-  localparam int MUL_LATENCY = 3;  // bf16WideMultiplier
+  localparam int MUL_LATENCY = 5;  // bf16WideMultiplier (its operands registered; its add and its normalization a stage each)
   localparam int ADD_LATENCY = 7;  // fp32Adder: seven stages (the compare and the result mux on their own)
   localparam int LANE_MUL_LATENCY = 3;  // bf16Multiplier
   localparam int POST_MUL_LATENCY = 3;  // the float post multiply is the lane multiply
@@ -147,7 +147,7 @@ package sienna_fmt_pkg;
   localparam int RESULT_DATA_WIDTH = 32;
   localparam int BIAS_DATA_WIDTH = 32;
   localparam int ACTIVATION_DATA_WIDTH = 32;
-  localparam int MUL_LATENCY = 9;  // the mesh's fp32Multiplier (fmt_mul MESH): Karatsuba product, its Booth sums over two cycles
+  localparam int MUL_LATENCY = 11;  // the mesh's fp32Multiplier (fmt_mul MESH): its operands registered, the Booth sums and the middle term over two cycles each
   localparam int ADD_LATENCY = 7;  // fp32Adder: seven stages (the compare and the result mux on their own)
   localparam int LANE_MUL_LATENCY = 8;  // the lanes' fp32Multiplier: its Booth sums in one cycle (the Horner loop waits on it)
   localparam int POST_MUL_LATENCY = 8;  // the float post multiply is the lane multiply

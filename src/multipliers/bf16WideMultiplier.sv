@@ -2,7 +2,7 @@
 
 // bf16 x bf16 -> fp32, the exact product: fpMulWiden's algorithm with the format fixed at 8 exponent and 7 mantissa bits.
 // Subnormal inputs read as zero, underflow flushes to a signed zero, overflow gives infinity, any NaN gives 7FC00000.
-// valid_i at t, done_o at t+3. Only the valid chain is reset (D-8); the flags are zero in every cycle without done_o.
+// valid_i at t, done_o at t+5: the operands are registered first (in the PE they also feed the next PE: a_o/b_o -> s1_exp). Only the valid chain is reset (D-8); the flags are zero in every cycle without done_o.
 module bf16WideMultiplier #(
     localparam int EXPONENT_WIDTH = 8,
     localparam int MANTISSA_WIDTH = 7,
@@ -35,7 +35,12 @@ module bf16WideMultiplier #(
   logic signed [11:0] s2_exp;
   logic [PRODUCT_WIDTH-1:0] s2_significand_product;  // s2_product_s + s2_product_c, added in stage 3
   logic [PRODUCT_WIDTH-1:0] s2_product_s, s2_product_c;  // the product in carry-save form (the 8x8 multiply in stage 2 was the bf16 PE's 1.02-1.03 ns)
-  // Stage 3: the normalized exponent and mantissa; the exponent and its range checks for a product below 2 (0) and from 2 (1), from s2_exp alone.
+  // Stage 3: the significand product's add, registered with the class and exponent (the add, its top bit into the normalization and the
+  // special cases in one stage were the bf16 meshes' 0.87-0.98 ns at 0.8, s2_product -> result_o).
+  logic s3_valid, s3_sign, s3_nan, s3_inf, s3_zero, s3_invalid;
+  logic signed [11:0] s3_exp;
+  logic [PRODUCT_WIDTH-1:0] s3_significand_product;
+  // Stage 4: the normalized exponent and mantissa; the exponent and its range checks for a product below 2 (0) and from 2 (1), from s3_exp alone.
   logic signed [11:0] exp_g[2];
   logic ovf_g[2], unf_g[2];
   logic [7:0] normalized_exponent;  // the exponent field; exp_g's range checks cover the rest
@@ -65,28 +70,37 @@ module bf16WideMultiplier #(
   initial if (PRODUCT_WIDTH > 22 || EXPONENT_WIDTH > 8) $error("bf16WideMultiplier: EXPONENT_WIDTH=%0d MANTISSA_WIDTH=%0d does not fit an exact fp32 product", EXPONENT_WIDTH, MANTISSA_WIDTH);
 `endif
 
+  // ── Stage 0: the operands registered ──
+  logic                  s0_valid;
+  logic [DATA_WIDTH-1:0] a_q, b_q;
+  always_ff @(posedge clk_i or negedge rstn_i)
+    if (!rstn_i) s0_valid <= 1'b0;
+    else s0_valid <= valid_i;
+  always_ff @(posedge clk_i)
+    if (valid_i) {a_q, b_q} <= {a_i, b_i};  // no reset: read only with s0_valid
+
   // ── Stage 1: classify the inputs and add the exponents, rebased to fp32's bias ──
   always_ff @(posedge clk_i or negedge rstn_i) begin
     if (!rstn_i) s1_valid <= 1'b0;
-    else s1_valid <= valid_i;
+    else s1_valid <= s0_valid;
   end
 
   always_ff @(posedge clk_i) begin
-    if (valid_i) begin
-      automatic logic [EXPONENT_WIDTH-1:0] exponent_a = a_i[DATA_WIDTH-2:MANTISSA_WIDTH], exponent_b = b_i[DATA_WIDTH-2:MANTISSA_WIDTH];
+    if (s0_valid) begin
+      automatic logic [EXPONENT_WIDTH-1:0] exponent_a = a_q[DATA_WIDTH-2:MANTISSA_WIDTH], exponent_b = b_q[DATA_WIDTH-2:MANTISSA_WIDTH];
       automatic logic zero_a = (exponent_a == '0), zero_b = (exponent_b == '0);
-      automatic logic inf_a = (exponent_a == EXPONENT_ALL_ONES) && (a_i[MANTISSA_WIDTH-1:0] == '0), inf_b = (exponent_b == EXPONENT_ALL_ONES) && (b_i[MANTISSA_WIDTH-1:0] == '0);
-      automatic logic nan_a = (exponent_a == EXPONENT_ALL_ONES) && (a_i[MANTISSA_WIDTH-1:0] != '0), nan_b = (exponent_b == EXPONENT_ALL_ONES) && (b_i[MANTISSA_WIDTH-1:0] != '0);
-      automatic logic signaling_nan_in = (nan_a && !a_i[MANTISSA_WIDTH-1]) || (nan_b && !b_i[MANTISSA_WIDTH-1]);
+      automatic logic inf_a = (exponent_a == EXPONENT_ALL_ONES) && (a_q[MANTISSA_WIDTH-1:0] == '0), inf_b = (exponent_b == EXPONENT_ALL_ONES) && (b_q[MANTISSA_WIDTH-1:0] == '0);
+      automatic logic nan_a = (exponent_a == EXPONENT_ALL_ONES) && (a_q[MANTISSA_WIDTH-1:0] != '0), nan_b = (exponent_b == EXPONENT_ALL_ONES) && (b_q[MANTISSA_WIDTH-1:0] != '0);
+      automatic logic signaling_nan_in = (nan_a && !a_q[MANTISSA_WIDTH-1]) || (nan_b && !b_q[MANTISSA_WIDTH-1]);
       automatic logic invalid = (zero_a && inf_b) || (inf_a && zero_b);
-      s1_sign    <= a_i[DATA_WIDTH-1] ^ b_i[DATA_WIDTH-1];
+      s1_sign    <= a_q[DATA_WIDTH-1] ^ b_q[DATA_WIDTH-1];
       s1_nan     <= nan_a || nan_b || invalid;
       s1_invalid <= invalid || signaling_nan_in;
       s1_inf     <= inf_a || inf_b;
       s1_zero    <= zero_a || zero_b;
       s1_exp     <= $signed({4'b0, exponent_a}) + $signed({4'b0, exponent_b}) - 12'(2 * EXPONENT_BIAS) + 12'sd127;
-      s1_significand_a      <= {1'b1, a_i[MANTISSA_WIDTH-1:0]};
-      s1_significand_b      <= {1'b1, b_i[MANTISSA_WIDTH-1:0]};
+      s1_significand_a      <= {1'b1, a_q[MANTISSA_WIDTH-1:0]};
+      s1_significand_b      <= {1'b1, b_q[MANTISSA_WIDTH-1:0]};
     end
   end
 
@@ -104,40 +118,51 @@ module bf16WideMultiplier #(
     end
   end
 
-  // ── Stage 3: normalize (product in [1, 4)), place in fp32, handle range ──
+  // ── Stage 3: the significand product's add ──
   assign s2_significand_product = s2_product_s + s2_product_c;
+  always_ff @(posedge clk_i or negedge rstn_i) begin
+    if (!rstn_i) s3_valid <= 1'b0;
+    else s3_valid <= s2_valid;
+  end
+  always_ff @(posedge clk_i)
+    if (s2_valid) begin
+      {s3_sign, s3_nan, s3_inf, s3_zero, s3_invalid} <= {s2_sign, s2_nan, s2_inf, s2_zero, s2_invalid};
+      s3_exp <= s2_exp;
+      s3_significand_product <= s2_significand_product;
+    end
+  // ── Stage 4: normalize (product in [1, 4)), place in fp32, handle range ──
   always_comb
     for (int g = 0; g < 2; g++) begin
-      exp_g[g] = s2_exp + 12'(g);
+      exp_g[g] = s3_exp + 12'(g);
       ovf_g[g] = exp_g[g] >= 12'sd255;
       unf_g[g] = exp_g[g] <= 12'sd0;
     end
   always_comb begin
-    normalized_exponent = 8'(exp_g[s2_significand_product[PRODUCT_WIDTH-1]]);
-    normalized_mantissa = s2_significand_product[PRODUCT_WIDTH-1] ? 23'({s2_significand_product[PRODUCT_WIDTH-2:0], {(24 - PRODUCT_WIDTH){1'b0}}}) : 23'({s2_significand_product[PRODUCT_WIDTH-3:0], {(25 - PRODUCT_WIDTH){1'b0}}});
+    normalized_exponent = 8'(exp_g[s3_significand_product[PRODUCT_WIDTH-1]]);
+    normalized_mantissa = s3_significand_product[PRODUCT_WIDTH-1] ? 23'({s3_significand_product[PRODUCT_WIDTH-2:0], {(24 - PRODUCT_WIDTH){1'b0}}}) : 23'({s3_significand_product[PRODUCT_WIDTH-3:0], {(25 - PRODUCT_WIDTH){1'b0}}});
   end
 
   always_ff @(posedge clk_i or negedge rstn_i) begin
     if (!rstn_i) done_o <= 1'b0;
-    else done_o <= s2_valid;
+    else done_o <= s3_valid;
   end
 
   always_ff @(posedge clk_i) begin
     overflow_o  <= 1'b0;
     underflow_o <= 1'b0;
     invalid_o   <= 1'b0;
-    if (s2_valid) begin
-      invalid_o <= s2_invalid;
-      if (s2_nan) result_o <= 32'h7FC00000;
-      else if (s2_inf) result_o <= {s2_sign, 8'hFF, 23'd0};
-      else if (s2_zero) result_o <= {s2_sign, 31'd0};
-      else if (ovf_g[s2_significand_product[PRODUCT_WIDTH-1]]) begin
-        result_o   <= {s2_sign, 8'hFF, 23'd0};
+    if (s3_valid) begin
+      invalid_o <= s3_invalid;
+      if (s3_nan) result_o <= 32'h7FC00000;
+      else if (s3_inf) result_o <= {s3_sign, 8'hFF, 23'd0};
+      else if (s3_zero) result_o <= {s3_sign, 31'd0};
+      else if (ovf_g[s3_significand_product[PRODUCT_WIDTH-1]]) begin
+        result_o   <= {s3_sign, 8'hFF, 23'd0};
         overflow_o <= 1'b1;
-      end else if (unf_g[s2_significand_product[PRODUCT_WIDTH-1]]) begin
-        result_o    <= {s2_sign, 31'd0};
+      end else if (unf_g[s3_significand_product[PRODUCT_WIDTH-1]]) begin
+        result_o    <= {s3_sign, 31'd0};
         underflow_o <= 1'b1;
-      end else result_o <= {s2_sign, 8'(normalized_exponent), normalized_mantissa};
+      end else result_o <= {s3_sign, 8'(normalized_exponent), normalized_mantissa};
     end
   end
 

@@ -10,7 +10,7 @@ module fmt_mul #(
 `else
     , parameter int EXT_DATA_WIDTH = DATA_WIDTH
 `endif
-    , parameter bit MESH = 1'b0  // the mesh's product: MUL_LATENCY cycles (fp32: the Booth sums over two), else mul_latency's
+    , parameter bit MESH = 1'b0  // the mesh's product: MUL_LATENCY cycles (fp32: the operands registered, the Booth sums and the middle term over two each), else mul_latency's
 ) (
     input  logic                      clk_i,
     input  logic                      rstn_i,
@@ -25,10 +25,9 @@ module fmt_mul #(
   end
 `ifndef FMT_INT8
 `ifndef FMT_BF16
-  if (sienna_fmt_pkg::MUL_LATENCY - sienna_fmt_pkg::LANE_MUL_LATENCY != 0 && sienna_fmt_pkg::MUL_LATENCY - sienna_fmt_pkg::LANE_MUL_LATENCY != 1)
-  begin : G_BAD_MESH_LATENCY
-    $fatal(1, "fmt_mul: fp32's mesh multiply is the lane one or one cycle more, not %0d against %0d", sienna_fmt_pkg::MUL_LATENCY,
-           sienna_fmt_pkg::LANE_MUL_LATENCY);
+  if (sienna_fmt_pkg::MUL_LATENCY != sienna_fmt_pkg::LANE_MUL_LATENCY + 3) begin : G_BAD_MESH_LATENCY
+    $fatal(1, "fmt_mul: fp32's mesh multiply is the lane one plus three (the input register, the Booth sum and the middle term over two cycles each), not %0d against %0d",
+           sienna_fmt_pkg::MUL_LATENCY, sienna_fmt_pkg::LANE_MUL_LATENCY);
   end
 `endif
 `endif
@@ -55,7 +54,7 @@ module fmt_mul #(
   if (DATA_WIDTH != 32 || EXT_DATA_WIDTH != 32) begin : G_BAD_DATA_WIDTH
     $fatal(1, "fmt_mul: fp32 multiplies DATA_WIDTH = 32 into EXT_DATA_WIDTH = 32, not %0d into %0d", DATA_WIDTH, EXT_DATA_WIDTH);
   end else begin : G_FP32  // only a legal width elaborates the multiplier
-    fp32Multiplier #(.BOOTH_SUM_STAGES(MESH ? sienna_fmt_pkg::MUL_LATENCY - sienna_fmt_pkg::LANE_MUL_LATENCY + 1 : 1)) MUL (.clk_i(clk_i), .rstn_i(rstn_i), .valid_i(valid_i), .A(a_i), .B(b_i), .result_o(product_o),
+    fp32Multiplier #(.BOOTH_SUM_STAGES(MESH ? 2 : 1), .MID_SPLIT(MESH), .IN_REG(MESH)) MUL (.clk_i(clk_i), .rstn_i(rstn_i), .valid_i(valid_i), .A(a_i), .B(b_i), .result_o(product_o),
         .done_o(done_o), .overflow_o(), .underflow_o(), .invalid_o());
   end
 `endif

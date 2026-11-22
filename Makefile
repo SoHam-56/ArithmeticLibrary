@@ -234,7 +234,7 @@ common-mem_fatal:
 
 # Pipelined integer multiplier: lint of every use's shape, TB_intMulPipe (corners and random pairs against a_i * b_i) in each of them.
 MP_SRC  = $(SRC)/multipliers/intMulPipe.sv
-MP_CFGS = 16_16_2 24_24_3 24_24_3_2 32_25_3 33_9_2 3_2_2
+MP_CFGS = 8_8_3 16_16_2 24_24_3 24_24_3_2 32_25_3 33_9_2 3_2_2
 MP_RUNS = $(addprefix common-mulpipe_run_,$(MP_CFGS))
 MP_G    = -GAW=$(word 1,$(1)) -GBW=$(word 2,$(1)) -GSTAGES=$(word 3,$(1))$(if $(word 4,$(1)), -GS1_LEVELS=$(word 4,$(1)))
 MP_P    = -pvalue+TB_intMulPipe.AW=$(word 1,$(1)) -pvalue+TB_intMulPipe.BW=$(word 2,$(1)) -pvalue+TB_intMulPipe.STAGES=$(word 3,$(1))$(if $(word 4,$(1)), -pvalue+TB_intMulPipe.S1_LEVELS=$(word 4,$(1)))

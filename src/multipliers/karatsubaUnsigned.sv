@@ -2,7 +2,8 @@
 
 module karatsubaUnsigned #(
     parameter WIDTH = 24,
-    parameter int BOOTH_SUM_STAGES = 1  // R4Booth's SUM_STAGES: its partial products' sum in one cycle or two (valid_o follows)
+    parameter int BOOTH_SUM_STAGES = 1,  // R4Booth's SUM_STAGES: its partial products' sum in one cycle or two (valid_o follows)
+    parameter bit MID_SPLIT = 1'b0  // the middle term's add (mm_s + mm_c + 1) over two cycles: its low half and carry, then the high half
 ) (
     input logic clk_i,
     input logic rstn_i,
@@ -146,23 +147,56 @@ module karatsubaUnsigned #(
   // =========================================================================
   // Stage 5: Post-Processing - Final Middle Term & Shifting
   // =========================================================================
-  always_ff @(posedge clk_i or negedge rstn_i) begin
-    if (!rstn_i) begin
-      middle_term_final <= '0;
-      P_high_shifted <= '0;
-      P_low_d2 <= '0;
-      s5_valid <= '0;
-    end else begin
-      s5_valid <= s4_valid;
-
-      // Subtraction Step 2: the carry-save word's one add
-      middle_term_final <= mm_s + mm_c + 1'b1;
-
-      // Shift P_high by WIDTH (concatenation is free, but we register it)
-      P_high_shifted <= {P_high_d1, {WIDTH{1'b0}}};
-
-      // Delay P_low again
-      P_low_d2 <= P_low_d1;
+  if (!MID_SPLIT) begin : G_MID1
+    always_ff @(posedge clk_i or negedge rstn_i) begin
+      if (!rstn_i) begin
+        middle_term_final <= '0;
+        P_high_shifted <= '0;
+        P_low_d2 <= '0;
+        s5_valid <= '0;
+      end else begin
+        s5_valid <= s4_valid;
+        // Subtraction Step 2: the carry-save word's one add
+        middle_term_final <= mm_s + mm_c + 1'b1;
+        // Shift P_high by WIDTH (concatenation is free, but we register it)
+        P_high_shifted <= {P_high_d1, {WIDTH{1'b0}}};
+        // Delay P_low again
+        P_low_d2 <= P_low_d1;
+      end
+    end
+  end else begin : G_MID2
+    // The add's low half with its carry, the high halves and the products a cycle on, then the high half's add (the 26-bit add in one
+    // stage was the fp32 T2 and T8 meshes' 0.86-0.92 ns at 0.8, mm_c -> middle_term_final).
+    localparam int MH = (WIDTH + 2) / 2;
+    logic [MH:0] mid_lo;
+    logic [WIDTH+1-MH:0] mid_hs, mid_hc;
+    logic [WIDTH-1:0] P_low_d1b, P_high_d1b;
+    logic s5a_valid;
+    always_ff @(posedge clk_i or negedge rstn_i) begin
+      if (!rstn_i) begin
+        {mid_lo, mid_hs, mid_hc, P_low_d1b, P_high_d1b} <= '0;
+        s5a_valid <= 1'b0;
+      end else begin
+        s5a_valid  <= s4_valid;
+        mid_lo     <= {1'b0, mm_s[MH-1:0]} + {1'b0, mm_c[MH-1:0]} + (MH+1)'(1);
+        mid_hs     <= mm_s[WIDTH+1:MH];
+        mid_hc     <= mm_c[WIDTH+1:MH];
+        P_low_d1b  <= P_low_d1;
+        P_high_d1b <= P_high_d1;
+      end
+    end
+    always_ff @(posedge clk_i or negedge rstn_i) begin
+      if (!rstn_i) begin
+        middle_term_final <= '0;
+        P_high_shifted <= '0;
+        P_low_d2 <= '0;
+        s5_valid <= '0;
+      end else begin
+        s5_valid <= s5a_valid;
+        middle_term_final <= {mid_hs + mid_hc + (WIDTH+2-MH)'(mid_lo[MH]), mid_lo[MH-1:0]};  // == mm_s + mm_c + 1, mod 2^(WIDTH+2)
+        P_high_shifted <= {P_high_d1b, {WIDTH{1'b0}}};
+        P_low_d2 <= P_low_d1b;
+      end
     end
   end
 
