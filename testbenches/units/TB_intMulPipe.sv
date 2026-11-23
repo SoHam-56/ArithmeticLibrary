@@ -78,7 +78,7 @@ module TB_intMulPipe #(
   endfunction
 
   initial begin
-    int n = 0;
+    static int n = 0;  // static as an initial block's variables are (Verilator 5.054 IMPLICITSTATIC)
     repeat (4) @(posedge clk);
     #1 rstn = 1;
     for (int i = 0; i < NC; i++)
