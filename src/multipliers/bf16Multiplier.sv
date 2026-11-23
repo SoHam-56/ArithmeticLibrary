@@ -2,7 +2,7 @@
 
 // bf16 multiplier: fpMultiplier's algorithm with the format fixed at 8 exponent and 7 mantissa bits, so its words and done cycles
 // are fpMultiplier (8, 7)'s. Truncates; subnormal inputs read as zero, underflow flushes to a signed zero, overflow gives infinity, any
-// NaN the canonical quiet NaN. valid_i at t, done_o at t+3.
+// NaN the canonical quiet NaN. valid_i at t, done_o at t+4 (the operands registered first).
 module bf16Multiplier #(
     localparam int EXPONENT_WIDTH = 8,
     localparam int MANTISSA_WIDTH = 7,
@@ -19,13 +19,22 @@ module bf16Multiplier #(
     output reg          underflow_o,  // result flushed to zero
     output reg          invalid_o     // 0 * Inf, or a signaling NaN input
 );
+  // The operands registered first (a stage of their own: in the lanes this unit is in the Horner loop, whose budget took two cycles for
+  // these; the unpack and compare from the ports were the bf16 lanes' Horner limits at 0.8).
+  logic                  v_in;
+  logic [DATA_WIDTH-1:0] a_in, b_in;
+  always_ff @(posedge clk_i or negedge rstn_i)
+    if (!rstn_i) v_in <= 1'b0;
+    else v_in <= valid_i;
+  always_ff @(posedge clk_i)
+    if (valid_i) {a_in, b_in} <= {a_i, b_i};  // no reset: read only with v_in
   localparam int SIGNIFICAND_WIDTH = MANTISSA_WIDTH + 1;
   localparam int PRODUCT_WIDTH = 2 * SIGNIFICAND_WIDTH;
   localparam int EXPONENT_BIAS = (1 << (EXPONENT_WIDTH - 1)) - 1;
   localparam int EXPONENT_INF_CODE = (1 << EXPONENT_WIDTH) - 1;
   localparam int EXPONENT_SUM_WIDTH = EXPONENT_WIDTH + 2;  // exponent sum
   localparam bit USE_KARATSUBA = (SIGNIFICAND_WIDTH > 12);
-  localparam int PRODUCT_LATENCY = USE_KARATSUBA ? 6 : 1;  // karatsubaUnsigned: valid_i at t, valid_o at t+6
+  localparam int PRODUCT_LATENCY = USE_KARATSUBA ? 6 : 1;  // karatsubaUnsigned: v_in at t, valid_o at t+6
   localparam logic [EXPONENT_WIDTH-1:0] EXPONENT_ALL_ONES = '1;
   localparam logic [DATA_WIDTH-1:0] CANONICAL_QNAN = {1'b0, EXPONENT_ALL_ONES, 1'b1, {(MANTISSA_WIDTH - 1) {1'b0}}};
 
@@ -88,22 +97,22 @@ module bf16Multiplier #(
       s1_significand_a <= '0;
       s1_significand_b <= '0;
     end else begin
-      s1_valid <= valid_i;
-      if (valid_i) begin
-        automatic logic [EXPONENT_WIDTH-1:0] exponent_a = a_i[DATA_WIDTH-2:MANTISSA_WIDTH], exponent_b = b_i[DATA_WIDTH-2:MANTISSA_WIDTH];
+      s1_valid <= v_in;
+      if (v_in) begin
+        automatic logic [EXPONENT_WIDTH-1:0] exponent_a = a_in[DATA_WIDTH-2:MANTISSA_WIDTH], exponent_b = b_in[DATA_WIDTH-2:MANTISSA_WIDTH];
         automatic logic zero_a = (exponent_a == '0), zero_b = (exponent_b == '0);
-        automatic logic inf_a = (exponent_a == EXPONENT_ALL_ONES) && (a_i[MANTISSA_WIDTH-1:0] == '0), inf_b = (exponent_b == EXPONENT_ALL_ONES) && (b_i[MANTISSA_WIDTH-1:0] == '0);
-        automatic logic nan_a = (exponent_a == EXPONENT_ALL_ONES) && (a_i[MANTISSA_WIDTH-1:0] != '0), nan_b = (exponent_b == EXPONENT_ALL_ONES) && (b_i[MANTISSA_WIDTH-1:0] != '0);
-        automatic logic signaling_nan_in = (nan_a && !a_i[MANTISSA_WIDTH-1]) || (nan_b && !b_i[MANTISSA_WIDTH-1]);
+        automatic logic inf_a = (exponent_a == EXPONENT_ALL_ONES) && (a_in[MANTISSA_WIDTH-1:0] == '0), inf_b = (exponent_b == EXPONENT_ALL_ONES) && (b_in[MANTISSA_WIDTH-1:0] == '0);
+        automatic logic nan_a = (exponent_a == EXPONENT_ALL_ONES) && (a_in[MANTISSA_WIDTH-1:0] != '0), nan_b = (exponent_b == EXPONENT_ALL_ONES) && (b_in[MANTISSA_WIDTH-1:0] != '0);
+        automatic logic signaling_nan_in = (nan_a && !a_in[MANTISSA_WIDTH-1]) || (nan_b && !b_in[MANTISSA_WIDTH-1]);
         automatic logic invalid = (zero_a && inf_b) || (inf_a && zero_b);
         s1_class.nan  <= nan_a || nan_b || invalid;
         s1_class.invalid  <= invalid || signaling_nan_in;
         s1_class.inf  <= inf_a || inf_b;
         s1_class.zero <= zero_a || zero_b;
-        s1_class.sign <= a_i[DATA_WIDTH-1] ^ b_i[DATA_WIDTH-1];
+        s1_class.sign <= a_in[DATA_WIDTH-1] ^ b_in[DATA_WIDTH-1];
         s1_class.exponent_sum  <= EXPONENT_SUM_WIDTH'(exponent_a) + EXPONENT_SUM_WIDTH'(exponent_b);
-        s1_significand_a     <= {1'b1, a_i[MANTISSA_WIDTH-1:0]};
-        s1_significand_b     <= {1'b1, b_i[MANTISSA_WIDTH-1:0]};
+        s1_significand_a     <= {1'b1, a_in[MANTISSA_WIDTH-1:0]};
+        s1_significand_b     <= {1'b1, b_in[MANTISSA_WIDTH-1:0]};
       end
     end
   end

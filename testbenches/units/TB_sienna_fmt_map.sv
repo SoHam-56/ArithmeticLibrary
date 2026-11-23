@@ -24,18 +24,18 @@ module TB_sienna_fmt_map;
   localparam int WANT_LANE[4] = '{0, 7, 6, 5};  // EXPONENT_WIDTH, MANTISSA_WIDTH, HORNER_STEP_LATENCY, HORNER_COEFFICIENT_LAG
 `elsif FMT_BF16
   localparam string WANT_NAME = "bf16";
-  localparam int WANT[16] = '{16, 32, 16, 16, 16, 5, 7, 3, 6, 0, 0, 1, 1, 0, 0, 3};
+  localparam int WANT[16] = '{16, 32, 16, 16, 16, 5, 7, 4, 7, 0, 0, 1, 1, 0, 0, 4};
   localparam int WANT_LOWEST = 32'hFF80, WANT_ONE = 32'h3F80;
   localparam int WANT_BITS[5] = '{1, 1, 1, 1, 1};
   localparam int WANT_KEEP = 32'h4000;
-  localparam int WANT_LANE[4] = '{8, 7, 9, 3};
+  localparam int WANT_LANE[4] = '{8, 7, 11, 4};
 `else
   localparam string WANT_NAME = "fp32";
-  localparam int WANT[16] = '{32, 32, 32, 32, 32, 11, 7, 8, 7, 0, 0, 1, 0, 0, 0, 8};  // fp32 has no GPNAE tail
+  localparam int WANT[16] = '{32, 32, 32, 32, 32, 11, 7, 10, 7, 0, 0, 1, 0, 0, 0, 10};  // fp32 has no GPNAE tail
   localparam int WANT_LOWEST = 32'hFF800000, WANT_ONE = 32'h3F800000;
   localparam int WANT_BITS[5] = '{1, 1, 1, 1, 1};
   localparam int WANT_KEEP = 32'h40000000;
-  localparam int WANT_LANE[4] = '{8, 23, 15, 8};
+  localparam int WANT_LANE[4] = '{8, 23, 17, 10};
 `endif
 `ifdef NO_FMT_DEFINE
   localparam int WANT_DEFINES = 0;
