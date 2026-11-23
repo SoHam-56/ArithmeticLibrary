@@ -26,29 +26,35 @@ module bf16WideMultiplier #(
   localparam int EXPONENT_BIAS = (1 << (EXPONENT_WIDTH - 1)) - 1;
   localparam logic [EXPONENT_WIDTH-1:0] EXPONENT_ALL_ONES = '1;
 
-  // Stage 1: the classes, the product's fp32-biased exponent before normalization, the significands.
+  // Stage 1: the classes, the exponent sum, the partial products through their first compressor level.
   logic s1_valid, s1_sign, s1_nan, s1_inf, s1_zero, s1_invalid;
-  logic signed [11:0] s1_exp;
-  logic [SIGNIFICAND_WIDTH-1:0] s1_significand_a, s1_significand_b;
+  logic [EXPONENT_WIDTH:0] s1_exp_sum;  // exponent_a + exponent_b; the rebias to fp32's is stage 2's (one 12-bit three-term add in stage 1 was N16 T2's b_q -> s1_exp)
+  logic [PRODUCT_WIDTH-1:0] s1_pp[6];  // the significand product's partial products after their first compressor level (8 -> 6 rows)
   // Stage 2: the significand product.
   logic s2_valid, s2_sign, s2_nan, s2_inf, s2_zero, s2_invalid;
   logic signed [11:0] s2_exp;
   logic [PRODUCT_WIDTH-1:0] s2_significand_product;  // s2_product_s + s2_product_c, added in stage 3
-  logic [PRODUCT_WIDTH-1:0] s2_product_s, s2_product_c;  // the product in carry-save form (the 8x8 multiply in stage 2 was the bf16 PE's 1.02-1.03 ns)
+  logic [PRODUCT_WIDTH-1:0] s2_product_s, s2_product_c;  // the product in carry-save form (the 8x8 multiply in stage 2 was the bf16 PE's 1.02-1.03 ns;
+                                                          // the partial products and the whole tree in stage 2 were N16 T4's 0.967, s1_significand_b -> s2_product_s)
   // Stage 3: the significand product's add, registered with the class and exponent (the add, its top bit into the normalization and the
   // special cases in one stage were the bf16 meshes' 0.87-0.98 ns at 0.8, s2_product -> result_o).
   logic s3_valid, s3_sign, s3_nan, s3_inf, s3_zero, s3_invalid;
   logic signed [11:0] s3_exp;
   logic [PRODUCT_WIDTH-1:0] s3_significand_product;
+  // The stage 3 add as a carry select: the low half, and the high half for either carry, side by side (one 16-bit add was N8 T2 / T4's 0.931).
+  localparam int HALF = PRODUCT_WIDTH / 2;
+  logic [HALF:0] add_lo;  // with its carry out
+  logic [PRODUCT_WIDTH-HALF-1:0] add_hi0, add_hi1;
   // Stage 4: the normalized exponent and mantissa; the exponent and its range checks for a product below 2 (0) and from 2 (1), from s3_exp alone.
   logic signed [11:0] exp_g[2];
   logic ovf_g[2], unf_g[2];
   logic [7:0] normalized_exponent;  // the exponent field; exp_g's range checks cover the rest
   logic [22:0] normalized_mantissa;
 
-  // a * b for 8-bit a and b in carry-save form {sum, carry}: sum + carry == a * b mod 2^16.
-  function automatic logic [2*PRODUCT_WIDTH-1:0] product_cs(input logic [SIGNIFICAND_WIDTH-1:0] a, input logic [SIGNIFICAND_WIDTH-1:0] b);
-    logic [PRODUCT_WIDTH-1:0] l0[8], l1[6], l2[4], l3[3];
+  // a * b for 8-bit a and b in carry-save form, in two parts: pp_level1 the partial products through the first compressor level (8 -> 6
+  // rows, stage 1), product_cs the rest (6 -> 2, stage 2); sum + carry == a * b mod 2^16.
+  function automatic logic [6*PRODUCT_WIDTH-1:0] pp_level1(input logic [SIGNIFICAND_WIDTH-1:0] a, input logic [SIGNIFICAND_WIDTH-1:0] b);
+    logic [PRODUCT_WIDTH-1:0] l0[8], l1[6];
     for (int i = 0; i < 8; i++) l0[i] = b[i] ? (PRODUCT_WIDTH'(a) << i) : '0;
     for (int i = 0; i < 2; i++) begin  // 8 -> 6: six through two compressors, two passed on
       l1[2*i]   = l0[3*i] ^ l0[3*i+1] ^ l0[3*i+2];
@@ -56,6 +62,10 @@ module bf16WideMultiplier #(
     end
     l1[4] = l0[6];
     l1[5] = l0[7];
+    return {l1[5], l1[4], l1[3], l1[2], l1[1], l1[0]};
+  endfunction
+  function automatic logic [2*PRODUCT_WIDTH-1:0] product_cs(input logic [PRODUCT_WIDTH-1:0] l1[6]);
+    logic [PRODUCT_WIDTH-1:0] l2[4], l3[3];
     for (int i = 0; i < 2; i++) begin  // 6 -> 4
       l2[2*i]   = l1[3*i] ^ l1[3*i+1] ^ l1[3*i+2];
       l2[2*i+1] = ((l1[3*i] & l1[3*i+1]) | (l1[3*i] & l1[3*i+2]) | (l1[3*i+1] & l1[3*i+2])) << 1;
@@ -98,9 +108,8 @@ module bf16WideMultiplier #(
       s1_invalid <= invalid || signaling_nan_in;
       s1_inf     <= inf_a || inf_b;
       s1_zero    <= zero_a || zero_b;
-      s1_exp     <= $signed({4'b0, exponent_a}) + $signed({4'b0, exponent_b}) - 12'(2 * EXPONENT_BIAS) + 12'sd127;
-      s1_significand_a      <= {1'b1, a_q[MANTISSA_WIDTH-1:0]};
-      s1_significand_b      <= {1'b1, b_q[MANTISSA_WIDTH-1:0]};
+      s1_exp_sum <= {1'b0, exponent_a} + {1'b0, exponent_b};
+      {s1_pp[5], s1_pp[4], s1_pp[3], s1_pp[2], s1_pp[1], s1_pp[0]} <= pp_level1({1'b1, a_q[MANTISSA_WIDTH-1:0]}, {1'b1, b_q[MANTISSA_WIDTH-1:0]});
     end
   end
 
@@ -113,13 +122,16 @@ module bf16WideMultiplier #(
   always_ff @(posedge clk_i) begin
     if (s1_valid) begin
       {s2_sign, s2_nan, s2_inf, s2_zero, s2_invalid} <= {s1_sign, s1_nan, s1_inf, s1_zero, s1_invalid};
-      s2_exp <= s1_exp;
-      {s2_product_s, s2_product_c} <= product_cs(s1_significand_a, s1_significand_b);
+      s2_exp <= $signed({3'b0, s1_exp_sum}) - 12'(2 * EXPONENT_BIAS) + 12'sd127;  // the product's fp32-biased exponent before normalization
+      {s2_product_s, s2_product_c} <= product_cs(s1_pp);
     end
   end
 
   // ── Stage 3: the significand product's add ──
-  assign s2_significand_product = s2_product_s + s2_product_c;
+  assign add_lo  = {1'b0, s2_product_s[HALF-1:0]} + {1'b0, s2_product_c[HALF-1:0]};
+  assign add_hi0 = s2_product_s[PRODUCT_WIDTH-1:HALF] + s2_product_c[PRODUCT_WIDTH-1:HALF];
+  assign add_hi1 = s2_product_s[PRODUCT_WIDTH-1:HALF] + s2_product_c[PRODUCT_WIDTH-1:HALF] + 1'b1;
+  assign s2_significand_product = {add_lo[HALF] ? add_hi1 : add_hi0, add_lo[HALF-1:0]};  // == s2_product_s + s2_product_c
   always_ff @(posedge clk_i or negedge rstn_i) begin
     if (!rstn_i) s3_valid <= 1'b0;
     else s3_valid <= s2_valid;
