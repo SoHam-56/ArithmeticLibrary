@@ -64,6 +64,7 @@ module mem_array #(
     for (int m = 0; m < 2; m++) for (int b = 0; b < NB; b++) {aw_max[m][b], ar_max[m][b], arw_max[m][b]} = '0;
     {a_cycles, a_wr, a_rd} = '0;
   end
+  /* verilator lint_off BLKSEQ */  // the audit's own counters, simulation only
   always @(posedge clk_i) begin
     automatic int wc[64], rc[64];
     a_cycles++;
@@ -71,8 +72,9 @@ module mem_array #(
     for (int p = 0; p < NR; p++) a_rd += re_i[p];
     for (int m = 0; m < 2; m++)
       for (int bi = 0; bi < NB; bi++) begin
-        automatic int nb = 2 << bi;
-        automatic int blk = (DEPTH + nb - 1) / nb;
+        automatic int nb, blk;  // assigned, not initialized: xsim may keep an automatic initializer's first value
+        nb  = 2 << bi;
+        blk = (DEPTH + nb - 1) / nb;
         for (int k = 0; k < 64; k++) begin wc[k] = 0; rc[k] = 0; end
         for (int p = 0; p < NW; p++) if (we_i[p]) wc[(m == 0) ? int'(waddr_i[p]) / blk : int'(waddr_i[p]) % nb]++;
         for (int p = 0; p < NR; p++) if (re_i[p]) rc[(m == 0) ? int'(raddr_i[p]) / blk : int'(raddr_i[p]) % nb]++;
@@ -83,6 +85,7 @@ module mem_array #(
         end
       end
   end
+  /* verilator lint_on BLKSEQ */
   final begin
     $display("MEM_AUDIT %m DEPTH=%0d WIDTH=%0d NW=%0d NR=%0d SYNC=%0d cycles=%0d writes=%0d reads=%0d", DEPTH, WIDTH, NW, NR, SYNC_READ, a_cycles,
              a_wr, a_rd);
