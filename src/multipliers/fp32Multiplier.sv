@@ -1,6 +1,10 @@
 `timescale 1ns / 100ps
 
-module fp32Multiplier (
+module fp32Multiplier #(
+    parameter int BOOTH_SUM_STAGES = 1,  // the Booth multipliers' partial-product sum in one cycle, or 2 (one cycle more)
+    parameter bit MID_SPLIT = 1'b0,  // the Karatsuba middle term's add over two cycles (one cycle more)
+    parameter bit IN_REG = 1'b0  // the operands registered before stage 1 (one cycle more: the mesh's, whose operands also feed the next PE)
+) (
     input wire        clk_i,
     input wire        rstn_i,
     input wire        valid_i,
@@ -64,11 +68,27 @@ module fp32Multiplier (
   logic [9:0] exp_calc_result;
   // The exponent result delayed to the product.
   meta_data_t sync_data;
-  logic [$bits(meta_data_t)-1:0] delay_reg;
+  // BOOTH_SUM_STAGES 2 (the mesh's multiplier, fmt_mul MESH): the Booth sums over two cycles (one 7-operand sum per cycle was the fp32
+  // Karatsuba's limit at 0.8 ns, pp_reg -> product); the exponent side's result waits one register per sum stage, so it meets the product.
+  localparam int META_D = BOOTH_SUM_STAGES + int'(MID_SPLIT);  // the exponent side's waiting registers: one, one more per extra product stage
+  logic [$bits(meta_data_t)-1:0] delay_reg[META_D];
   // The normalized result.
   logic final_is_underflow;
   logic [7:0] final_exp;
   logic [22:0] final_man;
+
+  // The operands as stage 1 reads them: the ports, or (IN_REG) a register of them.
+  logic        v_in;
+  logic [31:0] a_in, b_in;
+  if (IN_REG) begin : G_IN_REG
+    always_ff @(posedge clk_i or negedge rstn_i)
+      if (!rstn_i) v_in <= 1'b0;
+      else v_in <= valid_i;
+    always_ff @(posedge clk_i)
+      if (valid_i) {a_in, b_in} <= {A, B};  // no reset: read only with v_in
+  end else begin : G_IN_WIRE
+    assign {v_in, a_in, b_in} = {valid_i, A, B};
+  end
 
   always_ff @(posedge clk_i or negedge rstn_i) begin
     if (!rstn_i) begin
@@ -82,26 +102,26 @@ module fp32Multiplier (
       s1_is_invalid_op       <= 0;
       s1_is_snan             <= 0;
     end else begin
-      s1_valid <= valid_i;
+      s1_valid <= v_in;
 
-      if (valid_i) begin
+      if (v_in) begin
         logic zero_a, zero_b;
         logic inf_a, inf_b;
         logic nan_a, nan_b;
         logic snan_a, snan_b;
 
         // If Exponent is 0, treat as Zero even if mantissa is non-zero.
-        zero_a = (A[30:23] == 0);
-        zero_b = (B[30:23] == 0);
+        zero_a = (a_in[30:23] == 0);
+        zero_b = (b_in[30:23] == 0);
 
-        inf_a  = (A[30:23] == 8'hFF) && (A[22:0] == 0);
-        inf_b  = (B[30:23] == 8'hFF) && (B[22:0] == 0);
-        nan_a  = (A[30:23] == 8'hFF) && (A[22:0] != 0);
-        nan_b  = (B[30:23] == 8'hFF) && (B[22:0] != 0);
+        inf_a  = (a_in[30:23] == 8'hFF) && (a_in[22:0] == 0);
+        inf_b  = (b_in[30:23] == 8'hFF) && (b_in[22:0] == 0);
+        nan_a  = (a_in[30:23] == 8'hFF) && (a_in[22:0] != 0);
+        nan_b  = (b_in[30:23] == 8'hFF) && (b_in[22:0] != 0);
 
         // Signaling NaN Detection (MSB of Mantissa is 0)
-        snan_a = nan_a && (A[22] == 0);
-        snan_b = nan_b && (B[22] == 0);
+        snan_a = nan_a && (a_in[22] == 0);
+        snan_b = nan_b && (b_in[22] == 0);
 
         s1_is_input_nan  <= nan_a || nan_b;
         s1_is_snan       <= snan_a || snan_b;
@@ -113,26 +133,28 @@ module fp32Multiplier (
         s1_is_input_zero <= (zero_a || zero_b);
 
         if (zero_a || zero_b || inf_a || inf_b || nan_a || nan_b) begin
-          s1_sign_a <= A[31];
-          s1_sign_b <= B[31];
+          s1_sign_a <= a_in[31];
+          s1_sign_b <= b_in[31];
           s1_exp_a  <= 0;
           s1_exp_b  <= 0;
           s1_man_a  <= 0;
           s1_man_b  <= 0;
         end else begin
-          s1_sign_a <= A[31];
-          s1_sign_b <= B[31];
-          s1_exp_a  <= A[30:23];
-          s1_exp_b  <= B[30:23];
-          s1_man_a  <= {1'b1, A[22:0]};
-          s1_man_b  <= {1'b1, B[22:0]};
+          s1_sign_a <= a_in[31];
+          s1_sign_b <= b_in[31];
+          s1_exp_a  <= a_in[30:23];
+          s1_exp_b  <= b_in[30:23];
+          s1_man_a  <= {1'b1, a_in[22:0]};
+          s1_man_b  <= {1'b1, b_in[22:0]};
         end
       end
     end
   end
 
   karatsubaUnsigned #(
-      .WIDTH(24)
+      .WIDTH(24),
+      .BOOTH_SUM_STAGES(BOOTH_SUM_STAGES),
+      .MID_SPLIT(MID_SPLIT)
   ) u_karatsuba (
       .clk_i         (clk_i),
       .rstn_i        (rstn_i),
@@ -252,7 +274,8 @@ module fp32Multiplier (
   end
 
   always_ff @(posedge clk_i) begin
-    delay_reg <= {
+    for (int d = 1; d < META_D; d++) delay_reg[d] <= delay_reg[d-1];
+    delay_reg[0] <= {
       exp_calc_is_nan,
       exp_calc_is_inf,
       exp_calc_is_zero,
@@ -264,7 +287,7 @@ module fp32Multiplier (
       exp_calc_result
     };
   end
-  assign sync_data = delay_reg;
+  assign sync_data = delay_reg[META_D-1];
 
   always_comb begin
     final_is_underflow = sync_data.flag_un || (sync_data.flag_pot_un && !raw_product[47]);

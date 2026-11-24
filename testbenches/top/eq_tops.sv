@@ -4,7 +4,7 @@
 // the per-width integer units against the generic units at that width
 module eq_int8_mul (input logic clk_i, rstn_i, valid_i, input logic [7:0] a_i, b_i, output logic [15:0] result_new, result_generic, output logic done_new, done_generic);
   int8Multiplier NEW (.clk_i, .rstn_i, .valid_i, .a_i(a_i), .b_i(b_i), .result_o(result_new), .done_o(done_new));
-  intMultiplier #(.W(8)) GEN (.clk_i, .rstn_i, .valid_i, .A(a_i), .B(b_i), .result_o(result_generic), .done_o(done_generic));
+  intMultiplier #(.W(8), .STAGES(4)) GEN (.clk_i, .rstn_i, .valid_i, .A(a_i), .B(b_i), .result_o(result_generic), .done_o(done_generic));  // int8Multiplier: its operands registered, then intMulPipe 3
 endmodule
 
 module eq_int16_mul (input logic clk_i, rstn_i, valid_i, input logic [15:0] a_i, b_i, output logic [31:0] result_new, result_generic, output logic done_new, done_generic);

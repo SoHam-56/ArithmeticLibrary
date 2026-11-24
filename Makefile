@@ -234,10 +234,10 @@ common-mem_fatal:
 
 # Pipelined integer multiplier: lint of every use's shape, TB_intMulPipe (corners and random pairs against a_i * b_i) in each of them.
 MP_SRC  = $(SRC)/multipliers/intMulPipe.sv
-MP_CFGS = 16_16_2 24_24_3 32_25_3 33_9_2 3_2_2
+MP_CFGS = 8_8_3 16_16_2 24_24_3 24_24_3_2 32_25_3 33_9_2 3_2_2
 MP_RUNS = $(addprefix common-mulpipe_run_,$(MP_CFGS))
-MP_G    = -GAW=$(word 1,$(1)) -GBW=$(word 2,$(1)) -GSTAGES=$(word 3,$(1))
-MP_P    = -pvalue+TB_intMulPipe.AW=$(word 1,$(1)) -pvalue+TB_intMulPipe.BW=$(word 2,$(1)) -pvalue+TB_intMulPipe.STAGES=$(word 3,$(1))
+MP_G    = -GAW=$(word 1,$(1)) -GBW=$(word 2,$(1)) -GSTAGES=$(word 3,$(1))$(if $(word 4,$(1)), -GS1_LEVELS=$(word 4,$(1)))
+MP_P    = -pvalue+TB_intMulPipe.AW=$(word 1,$(1)) -pvalue+TB_intMulPipe.BW=$(word 2,$(1)) -pvalue+TB_intMulPipe.STAGES=$(word 3,$(1))$(if $(word 4,$(1)), -pvalue+TB_intMulPipe.S1_LEVELS=$(word 4,$(1)))
 MP_BUILD = $(if $(filter vcs,$(SIM)),$(call vcs_build,TB_intMulPipe,$$d,$(MP_SRC) $(TBU)/TB_intMulPipe.sv,$(1)),verilator $(CM_FLAGS) --top-module TB_intMulPipe $(2) --Mdir $$d $(MP_SRC) $(TBU)/TB_intMulPipe.sv -o sim)
 
 common-mulpipe: common-mulpipe_lint $(MP_RUNS)
@@ -248,7 +248,7 @@ ifeq ($(SIM),vcs)
 	@echo "mulpipe lint: not applicable to VCS (verilator --lint-only -Wall; VCS's +lint=all is the lint points' job)"
 else
 	@w=0; e=0; for cfg in $(MP_CFGS); do set -- $$(echo $$cfg | tr _ ' '); \
-	  verilator --lint-only -Wall -DSYNTHESIS --top-module intMulPipe -GAW=$$1 -GBW=$$2 -GSTAGES=$$3 $(MP_SRC) > $(ROOT)/Verilator/common/mulpipe_lint.log 2>&1; \
+	  verilator --lint-only -Wall -DSYNTHESIS --top-module intMulPipe -GAW=$$1 -GBW=$$2 -GSTAGES=$$3 $$([ -n "$$4" ] && echo -GS1_LEVELS=$$4) $(MP_SRC) > $(ROOT)/Verilator/common/mulpipe_lint.log 2>&1; \
 	  w=$$((w + $$(command grep -c '^%Warning' $(ROOT)/Verilator/common/mulpipe_lint.log))); \
 	  e=$$((e + $$(command grep -c '^%Error' $(ROOT)/Verilator/common/mulpipe_lint.log))); \
 	done; \
@@ -258,7 +258,7 @@ endif
 
 $(MP_RUNS): common-mulpipe_run_%:
 	@c=$*; d=$(CM_V)/mulpipe_$$c; rm -rf $$d; mkdir -p $(CM_V); set -- $$(echo $$c | tr _ ' '); \
-	$(call MP_BUILD,$(call MP_P,$$1 $$2 $$3),$(call MP_G,$$1 $$2 $$3)) > $$d.build.log 2>&1 \
+	$(call MP_BUILD,$(call MP_P,$(subst _, ,$*)),$(call MP_G,$(subst _, ,$*))) > $$d.build.log 2>&1 \
 	  || { echo "mulpipe FAIL: $$c: BUILD FAILED"; tail -20 $$d.build.log; exit 1; }; \
 	$$d/sim $(if $(filter vcs,$(SIM)),$(VCS_RUN)) > $$d.run.log 2>&1; \
 	line=$$(command grep -m1 "^MULPIPE " $$d.run.log); \

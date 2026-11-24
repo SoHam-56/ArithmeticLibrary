@@ -72,7 +72,8 @@ module TB_fmt;
           .overflow_o(), .underflow_o(), .invalid_o());
     end
 `else
-    fp32Multiplier REF (.clk_i(clk), .rstn_i(rstn), .valid_i(valid), .A(a[31:0]), .B(b[31:0]), .result_o(unit_word), .done_o(ref_done),
+    fp32Multiplier #(.BOOTH_SUM_STAGES(2), .MID_SPLIT(1'b1)) REF (.clk_i(clk),  // the lanes' setup: fmt_mul's MESH 0
+        .rstn_i(rstn), .valid_i(valid), .A(a[31:0]), .B(b[31:0]), .result_o(unit_word), .done_o(ref_done),
         .overflow_o(), .underflow_o(), .invalid_o());
 `endif
     assign wrapper_result = 64'(wrapper_word);
